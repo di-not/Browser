@@ -1,51 +1,55 @@
 <!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ответ из Memory/Disk HTTP Cache</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <header class="site-header">
-    <div class="container">
-      <p><a class="back-link" href="index.html">← На главную</a></p>
-      <h1>Ответ из Memory/Disk HTTP Cache</h1>
-    </div>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ответ из Memory/Disk HTTP Cache</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <p><a class="back-link" href="index.html">← На главную</a></p>
+        <h1>Ответ из Memory/Disk HTTP Cache</h1>
+      </div>
+    </header>
 
-  <main class="container">
-    <section>
-      <h2>Коротко о блоке</h2>
-      <p>
-        Блок <strong>«Ответ из Memory/Disk HTTP Cache»</strong> описывает ситуацию,
-        когда браузер может взять HTTP-ответ из собственного кэша, а не загружать
-        ресурс заново из сети.
-      </p>
-      <p>В схеме это выглядит так:</p>
-      <pre>Можно использовать локальный ответ?
+    <main class="container">
+      <section>
+        <h2>Коротко о блоке</h2>
+        <p>
+          Блок <strong>«Ответ из Memory/Disk HTTP Cache»</strong> описывает
+          ситуацию, когда браузер может взять HTTP-ответ из собственного кэша, а
+          не загружать ресурс заново из сети.
+        </p>
+        <p>В схеме это выглядит так:</p>
+        <pre>
+Можно использовать локальный ответ?
 → HTTP cache hit
 → Ответ из Memory/Disk HTTP Cache
-→ HTTP Response</pre>
-      <blockquote>
+→ HTTP Response</pre
+        >
+        <blockquote>
+          <p>
+            Если браузер уже загружал ресурс раньше и сохранённый ответ всё ещё
+            можно использовать, он может вернуть его из HTTP Cache. В этом
+            случае DNS, новое соединение и повторная передача ресурса могут не
+            понадобиться.
+          </p>
+        </blockquote>
+      </section>
+
+      <hr />
+
+      <section>
+        <h2>1. Что такое HTTP Cache</h2>
         <p>
-          Если браузер уже загружал ресурс раньше и сохранённый ответ всё ещё можно
-          использовать, он может вернуть его из HTTP Cache. В этом случае DNS, новое
-          соединение и повторная передача ресурса могут не понадобиться.
+          <strong>HTTP Cache</strong> — это механизм браузера, который сохраняет
+          HTTP responses и переиспользует их для следующих HTTP requests.
         </p>
-      </blockquote>
-    </section>
-
-    <hr>
-
-    <section>
-      <h2>1. Что такое HTTP Cache</h2>
-      <p>
-        <strong>HTTP Cache</strong> — это механизм браузера, который сохраняет
-        HTTP responses и переиспользует их для следующих HTTP requests.
-      </p>
-      <p>Пример:</p>
-      <pre>Первый заход:
+        <p>Пример:</p>
+        <pre>
+Первый заход:
 GET /styles.css
 → сервер вернул styles.css
 → браузер сохранил response в HTTP Cache
@@ -54,234 +58,284 @@ GET /styles.css
 GET /styles.css
 → браузер проверил HTTP Cache
 → нашёл подходящий response
-→ использовал его</pre>
-      <p>Кэшироваться могут:</p>
-      <pre>HTML
+→ использовал его</pre
+        >
+        <p>Кэшироваться могут:</p>
+        <pre>
+HTML
 CSS
 JavaScript
 images
 fonts
 JSON
-другие HTTP-ресурсы</pre>
-      <p>
-        Но будет ли ресурс сохранён и можно ли его использовать повторно, зависит от
-        HTTP-заголовков.
-      </p>
-    </section>
+другие HTTP-ресурсы</pre
+        >
+        <p>
+          Но будет ли ресурс сохранён и можно ли его использовать повторно,
+          зависит от HTTP-заголовков.
+        </p>
+      </section>
 
-    <section>
-      <h2>2. Memory Cache и Disk Cache</h2>
-      <p>В DevTools часто можно увидеть:</p>
-      <pre>from memory cache
-from disk cache</pre>
-      <p>
-        Это не два разных стандарта HTTP caching, а разные места, где браузер может
-        физически хранить кэшированный response.
-      </p>
+      <section>
+        <h2>2. Memory Cache и Disk Cache</h2>
+        <p>В DevTools часто можно увидеть:</p>
+        <pre>
+from memory cache
+from disk cache</pre
+        >
+        <p>
+          Это не два разных стандарта HTTP caching, а разные места, где браузер
+          может физически хранить кэшированный response.
+        </p>
 
-      <h3>Memory Cache</h3>
-      <p><strong>Memory Cache</strong> — кэш в оперативной памяти.</p>
-      <p>Особенности:</p>
-      <ul>
-        <li>очень быстрый;</li>
-        <li>обычно живёт недолго;</li>
-        <li>может очищаться при закрытии вкладки, навигации или нехватке памяти;</li>
-        <li>часто используется для ресурсов, которые недавно понадобились странице.</li>
-      </ul>
-      <p>Пример:</p>
-      <pre>страница загрузила /logo.png
+        <h3>Memory Cache</h3>
+        <p><strong>Memory Cache</strong> — кэш в оперативной памяти.</p>
+        <p>Особенности:</p>
+        <ul>
+          <li>очень быстрый;</li>
+          <li>обычно живёт недолго;</li>
+          <li>
+            может очищаться при закрытии вкладки, навигации или нехватке памяти;
+          </li>
+          <li>
+            часто используется для ресурсов, которые недавно понадобились
+            странице.
+          </li>
+        </ul>
+        <p>Пример:</p>
+        <pre>
+страница загрузила /logo.png
 потом этот же /logo.png понадобился снова
-браузер может взять его из memory cache</pre>
+браузер может взять его из memory cache</pre
+        >
 
-      <h3>Disk Cache</h3>
-      <p><strong>Disk Cache</strong> — кэш на диске.</p>
-      <p>Особенности:</p>
-      <ul>
-        <li>медленнее memory cache, но обычно всё равно быстрее сети;</li>
-        <li>может переживать закрытие вкладки или браузера;</li>
-        <li>подходит для более долгого хранения ресурсов;</li>
-        <li>ограничен размером и политиками браузера.</li>
-      </ul>
-      <p>Пример:</p>
-      <pre>пользователь уже заходил на сайт вчера
+        <h3>Disk Cache</h3>
+        <p><strong>Disk Cache</strong> — кэш на диске.</p>
+        <p>Особенности:</p>
+        <ul>
+          <li>медленнее memory cache, но обычно всё равно быстрее сети;</li>
+          <li>может переживать закрытие вкладки или браузера;</li>
+          <li>подходит для более долгого хранения ресурсов;</li>
+          <li>ограничен размером и политиками браузера.</li>
+        </ul>
+        <p>Пример:</p>
+        <pre>
+пользователь уже заходил на сайт вчера
 браузер сохранил /app.js на диск
-при новом заходе /app.js может быть взят из disk cache</pre>
-      <p>Важное различие:</p>
-      <pre>HTTP Cache → логический механизм кэширования HTTP responses
-Memory/Disk Cache → возможные физические места хранения внутри браузера</pre>
-      <p>
-        То есть <strong>Memory Cache</strong> и <strong>Disk Cache</strong> — это детали
-        реализации браузера. Основные правила всё равно задаются HTTP caching semantics
-        и HTTP-заголовками.
-      </p>
-    </section>
+при новом заходе /app.js может быть взят из disk cache</pre
+        >
+        <p>Важное различие:</p>
+        <pre>
+HTTP Cache → логический механизм кэширования HTTP responses
+Memory/Disk Cache → возможные физические места хранения внутри браузера</pre
+        >
+        <p>
+          То есть <strong>Memory Cache</strong> и <strong>Disk Cache</strong> —
+          это детали реализации браузера. Основные правила всё равно задаются
+          HTTP caching semantics и HTTP-заголовками.
+        </p>
+      </section>
 
-    <section>
-      <h2>3. HTTP cache hit и cache miss</h2>
-      <p>
-        <strong>HTTP cache hit</strong> — ситуация, когда браузер нашёл в HTTP Cache
-        подходящий response для текущего request.
-      </p>
-      <pre>Request
+      <section>
+        <h2>3. HTTP cache hit и cache miss</h2>
+        <p>
+          <strong>HTTP cache hit</strong> — ситуация, когда браузер нашёл в HTTP
+          Cache подходящий response для текущего request.
+        </p>
+        <pre>
+Request
 → HTTP Cache
 → подходящий response найден
-→ cache hit</pre>
-      <p>Если response можно использовать сразу:</p>
-      <pre>Request
+→ cache hit</pre
+        >
+        <p>Если response можно использовать сразу:</p>
+        <pre>
+Request
 → HTTP Cache
 → fresh response
-→ вернуть response без сети</pre>
-      <p><strong>Cache miss</strong> — ситуация, когда кэш не может отдать ответ.</p>
-      <p>Причины:</p>
-      <ul>
-        <li>ресурса нет в кэше;</li>
-        <li>URL отличается;</li>
-        <li>метод запроса не подходит;</li>
-        <li>response нельзя кэшировать;</li>
-        <li>response устарел и требует проверки;</li>
-        <li><code>Vary</code> говорит, что сохранённый response не подходит под текущие request headers.</li>
-      </ul>
-    </section>
+→ вернуть response без сети</pre
+        >
+        <p>
+          <strong>Cache miss</strong> — ситуация, когда кэш не может отдать
+          ответ.
+        </p>
+        <p>Причины:</p>
+        <ul>
+          <li>ресурса нет в кэше;</li>
+          <li>URL отличается;</li>
+          <li>метод запроса не подходит;</li>
+          <li>response нельзя кэшировать;</li>
+          <li>response устарел и требует проверки;</li>
+          <li>
+            <code>Vary</code> говорит, что сохранённый response не подходит под
+            текущие request headers.
+          </li>
+        </ul>
+      </section>
 
-    <section>
-      <h2>4. Fresh и stale</h2>
-      <p>Кэшированный response может быть <strong>fresh</strong> или <strong>stale</strong>.</p>
+      <section>
+        <h2>4. Fresh и stale</h2>
+        <p>
+          Кэшированный response может быть <strong>fresh</strong> или
+          <strong>stale</strong>.
+        </p>
 
-      <h3>Fresh response</h3>
-      <p>
-        <strong>Fresh response</strong> — свежий кэшированный ответ, который можно
-        использовать без обращения к серверу.
-      </p>
-      <p>Пример заголовка:</p>
-      <pre><code>Cache-Control: max-age=3600</code></pre>
-      <p>Это означает:</p>
-      <pre>response можно считать свежим 3600 секунд</pre>
-      <p>
-        Если браузер запрашивает этот ресурс в течение 3600 секунд, он может
-        использовать кэш без сети:
-      </p>
-      <pre>Request
+        <h3>Fresh response</h3>
+        <p>
+          <strong>Fresh response</strong> — свежий кэшированный ответ, который
+          можно использовать без обращения к серверу.
+        </p>
+        <p>Пример заголовка:</p>
+        <pre><code>Cache-Control: max-age=3600</code></pre>
+        <p>Это означает:</p>
+        <pre>response можно считать свежим 3600 секунд</pre>
+        <p>
+          Если браузер запрашивает этот ресурс в течение 3600 секунд, он может
+          использовать кэш без сети:
+        </p>
+        <pre>
+Request
 → HTTP Cache
 → response fresh
-→ вернуть response</pre>
+→ вернуть response</pre
+        >
 
-      <h3>Stale response</h3>
-      <p><strong>Stale response</strong> — устаревший кэшированный ответ.</p>
-      <p>
-        Это не значит, что его нужно сразу удалить. Это значит, что перед
-        использованием его обычно нужно проверить у сервера.
-      </p>
-      <pre>Request
+        <h3>Stale response</h3>
+        <p><strong>Stale response</strong> — устаревший кэшированный ответ.</p>
+        <p>
+          Это не значит, что его нужно сразу удалить. Это значит, что перед
+          использованием его обычно нужно проверить у сервера.
+        </p>
+        <pre>
+Request
 → HTTP Cache
 → response stale
-→ нужна revalidation</pre>
-    </section>
+→ нужна revalidation</pre
+        >
+      </section>
 
-    <section>
-      <h2>5. Revalidation</h2>
-      <p>
-        <strong>Revalidation</strong> — проверка у сервера, актуальна ли кэшированная копия.
-      </p>
-      <p>Если response устарел, браузер может отправить условный запрос:</p>
-      <pre>У меня есть версия ресурса.
-Она всё ещё актуальна?</pre>
-      <p>Если сервер отвечает:</p>
-      <pre><code>304 Not Modified</code></pre>
-      <p>это значит:</p>
-      <pre>ресурс не изменился
-можно использовать кэшированную копию</pre>
-      <p>В этом случае body ресурса не скачивается заново.</p>
+      <section>
+        <h2>5. Revalidation</h2>
+        <p>
+          <strong>Revalidation</strong> — проверка у сервера, актуальна ли
+          кэшированная копия.
+        </p>
+        <p>Если response устарел, браузер может отправить условный запрос:</p>
+        <pre>
+У меня есть версия ресурса.
+Она всё ещё актуальна?</pre
+        >
+        <p>Если сервер отвечает:</p>
+        <pre><code>304 Not Modified</code></pre>
+        <p>это значит:</p>
+        <pre>
+ресурс не изменился
+можно использовать кэшированную копию</pre
+        >
+        <p>В этом случае body ресурса не скачивается заново.</p>
 
-      <h3>Revalidation через ETag</h3>
-      <p>Первый ответ сервера:</p>
-      <pre><code>HTTP/1.1 200 OK
+        <h3>Revalidation через ETag</h3>
+        <p>Первый ответ сервера:</p>
+        <pre><code>HTTP/1.1 200 OK
 ETag: "abc123"
 Cache-Control: no-cache</code></pre>
-      <p>Браузер может сохранить response.</p>
-      <p>При повторном запросе он отправит:</p>
-      <pre><code>If-None-Match: "abc123"</code></pre>
-      <p>Если ресурс не изменился, сервер ответит:</p>
-      <pre><code>HTTP/1.1 304 Not Modified</code></pre>
-      <p>Браузер использует старое body из кэша.</p>
+        <p>Браузер может сохранить response.</p>
+        <p>При повторном запросе он отправит:</p>
+        <pre><code>If-None-Match: "abc123"</code></pre>
+        <p>Если ресурс не изменился, сервер ответит:</p>
+        <pre><code>HTTP/1.1 304 Not Modified</code></pre>
+        <p>Браузер использует старое body из кэша.</p>
 
-      <h3>Revalidation через Last-Modified</h3>
-      <p>Первый ответ сервера:</p>
-      <pre><code>Last-Modified: Tue, 15 Nov 2026 12:45:26 GMT</code></pre>
-      <p>Повторный запрос может содержать:</p>
-      <pre><code>If-Modified-Since: Tue, 15 Nov 2026 12:45:26 GMT</code></pre>
-      <p>Если ресурс не изменился:</p>
-      <pre><code>304 Not Modified</code></pre>
-    </section>
+        <h3>Revalidation через Last-Modified</h3>
+        <p>Первый ответ сервера:</p>
+        <pre><code>Last-Modified: Tue, 15 Nov 2026 12:45:26 GMT</code></pre>
+        <p>Повторный запрос может содержать:</p>
+        <pre><code>If-Modified-Since: Tue, 15 Nov 2026 12:45:26 GMT</code></pre>
+        <p>Если ресурс не изменился:</p>
+        <pre><code>304 Not Modified</code></pre>
+      </section>
 
-    <section>
-      <h2>6. Главные HTTP-заголовки кэширования</h2>
+      <section>
+        <h2>6. Главные HTTP-заголовки кэширования</h2>
 
-      <h3>Cache-Control</h3>
-      <p>
-        <strong>Cache-Control</strong> — главный HTTP-заголовок для управления кэшированием.
-      </p>
-      <pre><code>Cache-Control: max-age=3600</code></pre>
-      <p>Ответ можно использовать из кэша 3600 секунд.</p>
-      <pre><code>Cache-Control: no-store</code></pre>
-      <p>Ответ не должен сохраняться в кэше.</p>
-      <pre><code>Cache-Control: no-cache</code></pre>
-      <p>
-        Название сбивает с толку. <code>no-cache</code> обычно не означает
-        «не сохранять». Оно означает:
-      </p>
-      <pre>можно сохранить, но перед повторным использованием
-нужно проверить у сервера</pre>
-      <pre><code>Cache-Control: public, max-age=31536000, immutable</code></pre>
-      <p>Подходит для версионированных статических файлов:</p>
-      <pre>/app.8f3a2.js
-/styles.91ab.css</pre>
-      <p>
-        Такой файл можно долго хранить в кэше, потому что при изменении содержимого
-        меняется имя файла.
-      </p>
+        <h3>Cache-Control</h3>
+        <p>
+          <strong>Cache-Control</strong> — главный HTTP-заголовок для управления
+          кэшированием.
+        </p>
+        <pre><code>Cache-Control: max-age=3600</code></pre>
+        <p>Ответ можно использовать из кэша 3600 секунд.</p>
+        <pre><code>Cache-Control: no-store</code></pre>
+        <p>Ответ не должен сохраняться в кэше.</p>
+        <pre><code>Cache-Control: no-cache</code></pre>
+        <p>
+          Название сбивает с толку. <code>no-cache</code> обычно не означает «не
+          сохранять». Оно означает:
+        </p>
+        <pre>
+можно сохранить, но перед повторным использованием
+нужно проверить у сервера</pre
+        >
+        <pre><code>Cache-Control: public, max-age=31536000, immutable</code></pre>
+        <p>Подходит для версионированных статических файлов:</p>
+        <pre>
+/app.8f3a2.js
+/styles.91ab.css</pre
+        >
+        <p>
+          Такой файл можно долго хранить в кэше, потому что при изменении
+          содержимого меняется имя файла.
+        </p>
 
-      <h3>ETag</h3>
-      <p><strong>ETag</strong> — <strong>Entity Tag</strong>, идентификатор версии ресурса.</p>
-      <pre><code>ETag: "abc123"</code></pre>
-      <p>Если браузер позже хочет проверить ресурс, он отправляет:</p>
-      <pre><code>If-None-Match: "abc123"</code></pre>
+        <h3>ETag</h3>
+        <p>
+          <strong>ETag</strong> — <strong>Entity Tag</strong>, идентификатор
+          версии ресурса.
+        </p>
+        <pre><code>ETag: "abc123"</code></pre>
+        <p>Если браузер позже хочет проверить ресурс, он отправляет:</p>
+        <pre><code>If-None-Match: "abc123"</code></pre>
 
-      <h3>Last-Modified</h3>
-      <p>
-        <strong>Last-Modified</strong> — заголовок с датой последнего изменения ресурса.
-      </p>
-      <pre><code>Last-Modified: Tue, 15 Nov 2026 12:45:26 GMT</code></pre>
+        <h3>Last-Modified</h3>
+        <p>
+          <strong>Last-Modified</strong> — заголовок с датой последнего
+          изменения ресурса.
+        </p>
+        <pre><code>Last-Modified: Tue, 15 Nov 2026 12:45:26 GMT</code></pre>
 
-      <h3>Expires</h3>
-      <p>
-        <strong>Expires</strong> — старый способ указать дату, до которой response
-        считается свежим.
-      </p>
-      <pre><code>Expires: Wed, 21 Oct 2026 07:28:00 GMT</code></pre>
-      <p>
-        В современных приложениях чаще используют <code>Cache-Control</code>, потому что
-        он гибче.
-      </p>
+        <h3>Expires</h3>
+        <p>
+          <strong>Expires</strong> — старый способ указать дату, до которой
+          response считается свежим.
+        </p>
+        <pre><code>Expires: Wed, 21 Oct 2026 07:28:00 GMT</code></pre>
+        <p>
+          В современных приложениях чаще используют <code>Cache-Control</code>,
+          потому что он гибче.
+        </p>
 
-      <h3>Vary</h3>
-      <p>
-        <strong>Vary</strong> говорит кэшу, какие request headers влияют на выбор response.
-      </p>
-      <pre><code>Vary: Accept-Encoding</code></pre>
-      <p>
-        Это значит, что ответы для <code>gzip</code>, <code>br</code> и других вариантов
-        сжатия могут отличаться.
-      </p>
-      <pre><code>Vary: Accept-Language</code></pre>
-      <p>
-        Это значит, что ответ для <code>ru</code> и ответ для <code>en</code> могут быть разными.
-      </p>
-    </section>
+        <h3>Vary</h3>
+        <p>
+          <strong>Vary</strong> говорит кэшу, какие request headers влияют на
+          выбор response.
+        </p>
+        <pre><code>Vary: Accept-Encoding</code></pre>
+        <p>
+          Это значит, что ответы для <code>gzip</code>, <code>br</code> и других
+          вариантов сжатия могут отличаться.
+        </p>
+        <pre><code>Vary: Accept-Language</code></pre>
+        <p>
+          Это значит, что ответ для <code>ru</code> и ответ для
+          <code>en</code> могут быть разными.
+        </p>
+      </section>
 
-    <section>
-      <h2>7. Как браузер решает, можно ли использовать HTTP Cache</h2>
-      <p>Упрощённая логика:</p>
-      <pre>Request
+      <section>
+        <h2>7. Как браузер решает, можно ли использовать HTTP Cache</h2>
+        <p>Упрощённая логика:</p>
+        <pre>
+Request
 → есть ли response в HTTP Cache?
    ├─ нет
    │  → cache miss
@@ -302,45 +356,52 @@ Cache-Control: no-cache</code></pre>
                      ├─ 304 Not Modified
                      │  → использовать cached response
                      └─ 200 OK
-                        → сохранить новый response</pre>
-    </section>
+                        → сохранить новый response</pre
+        >
+      </section>
 
-    <section>
-      <h2>8. Что значит «Ответ из Memory/Disk HTTP Cache»</h2>
-      <p>Когда в DevTools видно:</p>
-      <pre>from memory cache</pre>
-      <p>или:</p>
-      <pre>from disk cache</pre>
-      <p>это обычно означает:</p>
-      <pre>браузер не скачивал resource body заново из сети,
-а использовал сохранённый response</pre>
-      <p>Есть два важных сценария.</p>
+      <section>
+        <h2>8. Что значит «Ответ из Memory/Disk HTTP Cache»</h2>
+        <p>Когда в DevTools видно:</p>
+        <pre>from memory cache</pre>
+        <p>или:</p>
+        <pre>from disk cache</pre>
+        <p>это обычно означает:</p>
+        <pre>
+браузер не скачивал resource body заново из сети,
+а использовал сохранённый response</pre
+        >
+        <p>Есть два важных сценария.</p>
 
-      <h3>Fresh cache hit</h3>
-      <pre>Request
+        <h3>Fresh cache hit</h3>
+        <pre>
+Request
 → HTTP Cache
 → fresh response
-→ вернуть response</pre>
-      <p>В этом случае может не быть сетевого запроса вообще.</p>
+→ вернуть response</pre
+        >
+        <p>В этом случае может не быть сетевого запроса вообще.</p>
 
-      <h3>Revalidation</h3>
-      <pre>Request
+        <h3>Revalidation</h3>
+        <pre>
+Request
 → HTTP Cache
 → stale response
 → conditional request
 → 304 Not Modified
-→ использовать cached body</pre>
-      <p>
-        В этом случае сеть была использована, но полный ресурс не скачивался заново.
-      </p>
-    </section>
+→ использовать cached body</pre
+        >
+        <p>
+          В этом случае сеть была использована, но полный ресурс не скачивался
+          заново.
+        </p>
+      </section>
 
-    <section>
-      <h2>9. HTTP Cache и Service Worker Cache — не одно и то же</h2>
-      <p>
-        Важно отличать этот блок от Service Worker / Cache Storage.
-      </p>
-      <pre>HTTP Cache
+      <section>
+        <h2>9. HTTP Cache и Service Worker Cache — не одно и то же</h2>
+        <p>Важно отличать этот блок от Service Worker / Cache Storage.</p>
+        <pre>
+HTTP Cache
 → управляется браузером
 → работает по HTTP headers
 → связан с HTTP caching rules
@@ -348,120 +409,187 @@ Cache-Control: no-cache</code></pre>
 Cache Storage
 → управляется JavaScript-кодом
 → часто используется Service Worker
-→ разработчик сам пишет стратегию</pre>
-      <p>Пример:</p>
-      <pre>HTTP Cache:
+→ разработчик сам пишет стратегию</pre
+        >
+        <p>Пример:</p>
+        <pre>
+HTTP Cache:
 сервер отправил Cache-Control: max-age=3600
 браузер сам решает, что response можно использовать час
 
 Cache Storage:
 Service Worker сам положил Response в caches.open("app-v1")
-и сам решил, когда его вернуть</pre>
-    </section>
+и сам решил, когда его вернуть</pre
+        >
+      </section>
 
-    <section>
-      <h2>10. Как этот блок связан с общей схемой</h2>
-      <p>После разбора URL браузер проверяет:</p>
-      <pre>Можно использовать локальный ответ?</pre>
-      <p>Если есть подходящий HTTP cache hit:</p>
-      <pre>Можно использовать локальный ответ?
+      <section>
+        <h2>10. Как этот блок связан с общей схемой</h2>
+        <p>После разбора URL браузер проверяет:</p>
+        <pre>Можно использовать локальный ответ?</pre>
+        <p>Если есть подходящий HTTP cache hit:</p>
+        <pre>
+Можно использовать локальный ответ?
 → HTTP cache hit
 → Ответ из Memory/Disk HTTP Cache
-→ HTTP Response</pre>
-      <p>Тогда браузер может не идти дальше в сетевую ветку:</p>
-      <pre>DNS
+→ HTTP Response</pre
+        >
+        <p>Тогда браузер может не идти дальше в сетевую ветку:</p>
+        <pre>
+DNS
 connection
-HTTP Request</pre>
-      <p>Но если кэш не подходит:</p>
-      <pre>HTTP cache miss
-или stale response требует проверки</pre>
-      <p>браузер продолжает сетевой путь.</p>
-    </section>
+HTTP Request</pre
+        >
+        <p>Но если кэш не подходит:</p>
+        <pre>
+HTTP cache miss
+или stale response требует проверки</pre
+        >
+        <p>браузер продолжает сетевой путь.</p>
+      </section>
 
-    <section>
-      <h2>11. Мини-глоссарий</h2>
+      <section>
+        <h2>11. Мини-глоссарий</h2>
 
-      <h3>HTTP Cache</h3>
-      <p>Браузерный механизм хранения и повторного использования HTTP responses.</p>
+        <h3>HTTP Cache</h3>
+        <p>
+          Браузерный механизм хранения и повторного использования HTTP
+          responses.
+        </p>
 
-      <h3>Memory Cache</h3>
-      <p>Кэш в оперативной памяти браузера.</p>
+        <h3>Memory Cache</h3>
+        <p>Кэш в оперативной памяти браузера.</p>
 
-      <h3>Disk Cache</h3>
-      <p>Кэш на диске.</p>
+        <h3>Disk Cache</h3>
+        <p>Кэш на диске.</p>
 
-      <h3>Cache hit</h3>
-      <p>Ситуация, когда подходящий response найден в кэше.</p>
+        <h3>Cache hit</h3>
+        <p>Ситуация, когда подходящий response найден в кэше.</p>
 
-      <h3>Cache miss</h3>
-      <p>Ситуация, когда подходящего response в кэше нет.</p>
+        <h3>Cache miss</h3>
+        <p>Ситуация, когда подходящего response в кэше нет.</p>
 
-      <h3>Fresh response</h3>
-      <p>Кэшированный response, который ещё можно использовать без проверки у сервера.</p>
+        <h3>Fresh response</h3>
+        <p>
+          Кэшированный response, который ещё можно использовать без проверки у
+          сервера.
+        </p>
 
-      <h3>Stale response</h3>
-      <p>Кэшированный response, срок свежести которого истёк.</p>
+        <h3>Stale response</h3>
+        <p>Кэшированный response, срок свежести которого истёк.</p>
 
-      <h3>Revalidation</h3>
-      <p>Проверка у сервера, актуальна ли кэшированная копия.</p>
+        <h3>Revalidation</h3>
+        <p>Проверка у сервера, актуальна ли кэшированная копия.</p>
 
-      <h3>Cache-Control</h3>
-      <p>HTTP-заголовок, задающий правила кэширования.</p>
+        <h3>Cache-Control</h3>
+        <p>HTTP-заголовок, задающий правила кэширования.</p>
 
-      <h3>max-age</h3>
-      <p>Директива <code>Cache-Control</code>, задающая время свежести response в секундах.</p>
+        <h3>max-age</h3>
+        <p>
+          Директива <code>Cache-Control</code>, задающая время свежести response
+          в секундах.
+        </p>
 
-      <h3>no-store</h3>
-      <p>Директива, запрещающая сохранять response в кэше.</p>
+        <h3>no-store</h3>
+        <p>Директива, запрещающая сохранять response в кэше.</p>
 
-      <h3>no-cache</h3>
-      <p>Директива, требующая проверки response у сервера перед повторным использованием.</p>
+        <h3>no-cache</h3>
+        <p>
+          Директива, требующая проверки response у сервера перед повторным
+          использованием.
+        </p>
 
-      <h3>ETag</h3>
-      <p>Entity Tag, идентификатор версии ресурса.</p>
+        <h3>ETag</h3>
+        <p>Entity Tag, идентификатор версии ресурса.</p>
 
-      <h3>If-None-Match</h3>
-      <p>Request header, через который браузер отправляет ETag для проверки актуальности.</p>
+        <h3>If-None-Match</h3>
+        <p>
+          Request header, через который браузер отправляет ETag для проверки
+          актуальности.
+        </p>
 
-      <h3>Last-Modified</h3>
-      <p>Response header с датой последнего изменения ресурса.</p>
+        <h3>Last-Modified</h3>
+        <p>Response header с датой последнего изменения ресурса.</p>
 
-      <h3>If-Modified-Since</h3>
-      <p>Request header для проверки ресурса по дате последнего изменения.</p>
+        <h3>If-Modified-Since</h3>
+        <p>Request header для проверки ресурса по дате последнего изменения.</p>
 
-      <h3>304 Not Modified</h3>
-      <p>
-        HTTP status, означающий, что ресурс не изменился и можно использовать
-        кэшированную копию.
-      </p>
+        <h3>304 Not Modified</h3>
+        <p>
+          HTTP status, означающий, что ресурс не изменился и можно использовать
+          кэшированную копию.
+        </p>
 
-      <h3>Expires</h3>
-      <p>Response header со временем, до которого response считается свежим.</p>
+        <h3>Expires</h3>
+        <p>
+          Response header со временем, до которого response считается свежим.
+        </p>
 
-      <h3>Vary</h3>
-      <p>Response header, указывающий, какие request headers влияют на выбор cached response.</p>
-    </section>
+        <h3>Vary</h3>
+        <p>
+          Response header, указывающий, какие request headers влияют на выбор
+          cached response.
+        </p>
+      </section>
 
-    <section>
-      <h2>Источники</h2>
-      <ul>
-        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching">MDN — HTTP caching</a></li>
-        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control">MDN — Cache-Control</a></li>
-        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/ETag">MDN — ETag</a></li>
-        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Last-Modified">MDN — Last-Modified</a></li>
-        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/304">MDN — 304 Not Modified</a></li>
-        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Vary">MDN — Vary</a></li>
-        <li><a href="https://web.dev/articles/http-cache">web.dev — Prevent unnecessary network requests with the HTTP Cache</a></li>
-        <li><a href="https://www.rfc-editor.org/rfc/rfc9111.html">RFC 9111 — HTTP Caching</a></li>
-        <li><a href="https://web.dev/articles/service-worker-caching-and-http-caching">web.dev — Service worker caching and HTTP caching</a></li>
-      </ul>
-    </section>
-  </main>
-
-  <footer class="site-footer">
-    <div class="container">
-      <p>Простая статья без декоративных блоков, подходит для локального открытия и GitHub Pages.</p>
-    </div>
-  </footer>
-</body>
+      <section>
+        <h2>Источники</h2>
+        <ul>
+          <li>
+            <a
+              href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching"
+              >MDN — HTTP caching</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control"
+              >MDN — Cache-Control</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/ETag"
+              >MDN — ETag</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Last-Modified"
+              >MDN — Last-Modified</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/304"
+              >MDN — 304 Not Modified</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Vary"
+              >MDN — Vary</a
+            >
+          </li>
+          <li>
+            <a href="https://web.dev/articles/http-cache"
+              >web.dev — Prevent unnecessary network requests with the HTTP
+              Cache</a
+            >
+          </li>
+          <li>
+            <a href="https://www.rfc-editor.org/rfc/rfc9111.html"
+              >RFC 9111 — HTTP Caching</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://web.dev/articles/service-worker-caching-and-http-caching"
+              >web.dev — Service worker caching and HTTP caching</a
+            >
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
 </html>

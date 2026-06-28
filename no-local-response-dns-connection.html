@@ -1,0 +1,721 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Локального ответа нет → DNS → соединение</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <p><a class="back-link" href="index.html">← На главную</a></p>
+        <h1>Локального ответа нет → DNS → соединение</h1>
+      </div>
+    </header>
+
+    <main class="container">
+      <section>
+        <h2>Границы блока</h2>
+        <p>
+          Этот материал описывает ветку, которая начинается после проверки
+          локального ответа и продолжается до момента, когда браузер готов
+          отправить HTTP-запрос.
+        </p>
+        <pre>
+IP для hostname уже известен?
+├─ No
+│  └─ DNS Resolution — получение IP
+│     └─ Есть переиспользуемое соединение?
+│        ├─ Yes → Переиспользовать TCP/TLS/QUIC соединение
+│        └─ No  → Открыть TCP/TLS или QUIC соединение
+│
+└─ Yes
+   └─ Есть переиспользуемое соединение?
+      ├─ Yes → Переиспользовать TCP/TLS/QUIC соединение
+      └─ No  → Открыть TCP/TLS или QUIC соединение</pre
+        >
+      </section>
+
+      <hr />
+
+      <section>
+        <h2>1. Общий смысл ветки</h2>
+        <p>
+          Если браузер не может получить ответ локально — через Service Worker,
+          Cache Storage или HTTP Cache, — он должен перейти к сетевой
+          подготовке.
+        </p>
+        <p>На этом этапе браузер уже знает компоненты URL:</p>
+        <pre>
+scheme
+hostname
+port
+path
+query</pre
+        >
+        <p>Например:</p>
+        <pre>https://example.com/products?page=2</pre>
+        <p>Даёт:</p>
+        <pre>
+scheme   = https
+hostname = example.com
+port     = 443 по умолчанию
+path     = /products
+query    = ?page=2</pre
+        >
+        <p>
+          Чтобы реально подключиться к серверу, браузеру нужен не просто
+          <code>hostname</code>, а сетевое направление:
+        </p>
+        <pre>IP-адрес + порт + подходящий транспорт</pre>
+        <p>Поэтому дальше браузер решает три задачи:</p>
+        <pre>
+1. Известен ли IP для hostname?
+2. Если IP неизвестен, получить его через DNS.
+3. Есть ли уже подходящее соединение, или нужно открыть новое?</pre
+        >
+      </section>
+
+      <section>
+        <h2>2. «IP для hostname уже известен?»</h2>
+
+        <h3>Определение</h3>
+        <p>
+          Блок <strong>«IP для hostname уже известен?»</strong> означает
+          проверку: есть ли у браузера, операционной системы или сетевой
+          инфраструктуры уже известный IP-адрес для имени хоста.
+        </p>
+        <p>Пример:</p>
+        <pre>hostname = example.com</pre>
+        <p>Браузеру нужно узнать:</p>
+        <pre>example.com → IP-адрес</pre>
+        <p>
+          Если это соответствие уже известно, браузер может не выполнять новый
+          DNS lookup.
+        </p>
+
+        <h3>Откуда IP может быть уже известен</h3>
+        <p>IP-адрес может быть известен из нескольких мест:</p>
+        <pre>
+DNS cache браузера
+DNS cache операционной системы
+DNS cache локального резолвера
+предыдущие запросы к тому же hostname
+dns-prefetch
+preconnect
+сам URL уже содержит IP-адрес</pre
+        >
+        <p>Пример URL, где DNS для домена не нужен:</p>
+        <pre>http://192.168.0.1/admin</pre>
+        <p>Здесь вместо доменного имени уже указан IPv4-адрес:</p>
+        <pre>192.168.0.1</pre>
+
+        <h3>Hostname и IP — не одно и то же</h3>
+        <p><code>hostname</code> — это имя хоста из URL:</p>
+        <pre>example.com</pre>
+        <p>IP-адрес — это сетевой адрес, к которому можно подключаться:</p>
+        <pre>93.184.216.34</pre>
+        <p>или IPv6:</p>
+        <pre>2606:2800:220:1:248:1893:25c8:1946</pre>
+        <p>Доменное имя удобно человеку, но сетевому стеку нужен IP-адрес.</p>
+      </section>
+
+      <section>
+        <h2>3. DNS Resolution — получение IP</h2>
+
+        <h3>Что такое DNS</h3>
+        <p>
+          <strong>DNS</strong> расшифровывается как
+          <strong>Domain Name System</strong>.
+        </p>
+        <p>
+          DNS — это иерархическая и децентрализованная система имён для
+          интернет-ресурсов. Она связывает доменные имена с ресурсными записями,
+          в том числе с IP-адресами.
+        </p>
+        <p>Главная идея:</p>
+        <pre>
+человек использует: example.com
+компьютеру нужен: IP-адрес
+DNS помогает получить: example.com → IP</pre
+        >
+
+        <h3>Что такое DNS Resolution</h3>
+        <p>
+          <strong>DNS Resolution</strong> — процесс получения IP-адреса по
+          hostname.
+        </p>
+        <p>Пример:</p>
+        <pre>
+hostname = example.com
+DNS resolution
+→ 93.184.216.34</pre
+        >
+        <p>После этого браузер может готовить соединение к:</p>
+        <pre>93.184.216.34:443</pre>
+        <p>Порт при этом берётся не из DNS, а из URL:</p>
+        <pre>
+явно указанный port
+или порт по умолчанию из scheme</pre
+        >
+        <p>Например:</p>
+        <pre>
+https → 443
+http  → 80</pre
+        >
+
+        <h3>DNS работает не со всем URL</h3>
+        <p>DNS не получает полный URL:</p>
+        <pre>https://example.com/products?page=2#reviews</pre>
+        <p>DNS работает только с именем:</p>
+        <pre>example.com</pre>
+        <p>DNS не обрабатывает:</p>
+        <pre>
+scheme = https
+path = /products
+query = ?page=2
+fragment = #reviews</pre
+        >
+
+        <h3>DNS lookup и DNS cache</h3>
+        <p>
+          <strong>DNS lookup</strong> — операция поиска DNS-записей для
+          hostname.
+        </p>
+        <p>
+          Перед реальным запросом к DNS-серверам браузер или ОС могут проверить
+          кэши:
+        </p>
+        <pre>
+browser DNS cache
+OS DNS cache
+resolver cache</pre
+        >
+        <p>
+          Если запись найдена и ещё актуальна, новый DNS-запрос может не
+          понадобиться.
+        </p>
+
+        <h3>TTL</h3>
+        <p><strong>TTL</strong> — <strong>Time To Live</strong>.</p>
+        <p>
+          В DNS TTL показывает, сколько времени запись может храниться в кэше.
+        </p>
+        <p>Пример:</p>
+        <pre>example.com A 93.184.216.34 TTL=300</pre>
+        <p>Упрощённо:</p>
+        <pre>этот результат можно кэшировать 300 секунд</pre>
+        <p>
+          После истечения TTL запись считается устаревшей, и её может
+          потребоваться получить заново.
+        </p>
+
+        <h3>A, AAAA и CNAME</h3>
+        <p>
+          <strong>A record</strong> — DNS-запись, которая указывает IPv4-адрес.
+        </p>
+        <pre>example.com A 93.184.216.34</pre>
+        <p>
+          <strong>AAAA record</strong> — DNS-запись, которая указывает
+          IPv6-адрес.
+        </p>
+        <pre>example.com AAAA 2606:2800:220:1:248:1893:25c8:1946</pre>
+        <p><strong>CNAME</strong> — <strong>Canonical Name record</strong>.</p>
+        <p>CNAME указывает, что одно доменное имя является алиасом другого.</p>
+        <pre>
+www.example.com CNAME example.com
+example.com A 93.184.216.34</pre
+        >
+        <p>Упрощённо:</p>
+        <pre>www.example.com → example.com → IP</pre>
+
+        <h3>Что получается после DNS</h3>
+        <p>
+          После DNS resolution браузер получает один или несколько IP-адресов.
+        </p>
+        <p>Например:</p>
+        <pre>
+example.com
+→ 93.184.216.34
+→ 2606:2800:220:1:248:1893:25c8:1946</pre
+        >
+        <p>
+          Дальше браузер выбирает подходящий адрес и переходит к проверке
+          соединения.
+        </p>
+      </section>
+
+      <section>
+        <h2>4. «Есть переиспользуемое соединение?»</h2>
+
+        <h3>Определение</h3>
+        <p>
+          После того как IP-адрес уже известен или получен через DNS, браузер
+          проверяет:
+        </p>
+        <pre>
+Есть ли уже открытое соединение, которое подходит для этого запроса?</pre
+        >
+        <p>
+          Если подходящее соединение есть, браузер может использовать его
+          повторно. Если нет — нужно открыть новое.
+        </p>
+
+        <h3>Почему соединение переиспользуют</h3>
+        <p>Открытие нового соединения занимает время.</p>
+        <p>Для HTTPS поверх TCP обычно нужны:</p>
+        <pre>
+TCP handshake
+TLS handshake
+согласование протокола</pre
+        >
+        <p>
+          Если соединение уже открыто и подходит, браузер может избежать части
+          этих затрат и быстрее перейти к отправке запроса.
+        </p>
+
+        <h3>Persistent connection</h3>
+        <p>
+          <strong>Persistent connection</strong> — постоянное соединение,
+          которое остаётся открытым между несколькими последовательными
+          запросами.
+        </p>
+        <p>Вместо модели:</p>
+        <pre>один запрос → одно соединение → закрыть</pre>
+        <p>используется модель:</p>
+        <pre>
+открыть соединение
+→ отправить запрос
+→ получить ответ
+→ оставить соединение открытым
+→ использовать для следующих запросов</pre
+        >
+
+        <h3>Keep-Alive</h3>
+        <p>
+          <strong>Keep-Alive</strong> — разговорное название идеи
+          переиспользования соединения.
+        </p>
+        <p>Смысл:</p>
+        <pre>
+не закрывать соединение сразу после ответа,
+а оставить его для следующих запросов</pre
+        >
+        <p>В HTTP/1.1 persistent connections являются обычной моделью.</p>
+
+        <h3>HTTP/2 multiplexing</h3>
+        <p>
+          В HTTP/2 несколько запросов и ответов могут передаваться как потоки
+          внутри одного соединения.
+        </p>
+        <p>Упрощённо:</p>
+        <pre>
+одно TCP/TLS соединение
+→ несколько HTTP/2 streams
+→ CSS, JS, images и API-запросы могут идти через одно соединение</pre
+        >
+        <p>Это называется <strong>multiplexing</strong>.</p>
+        <p>Преимущество:</p>
+        <pre>
+меньше новых соединений
+меньше handshake overhead
+лучшее использование одного соединения</pre
+        >
+
+        <h3>HTTP/3 и QUIC</h3>
+        <p>В HTTP/3 используется QUIC.</p>
+        <p>
+          HTTP/3 сохраняет HTTP semantics, но переносит их поверх QUIC вместо
+          TCP. QUIC предоставляет транспорт с потоками, multiplexing, flow
+          control, защищённостью и более быстрой установкой соединения в
+          некоторых сценариях.
+        </p>
+        <p>Упрощённо:</p>
+        <pre>
+HTTP/1.1 → обычно TCP
+HTTP/2   → обычно TCP + TLS
+HTTP/3   → QUIC поверх UDP</pre
+        >
+
+        <h3>Когда соединение можно переиспользовать</h3>
+        <p>Для базового понимания:</p>
+        <pre>
+соединение можно переиспользовать,
+если оно уже открыто и подходит для нужного сетевого назначения</pre
+        >
+        <p>На практике браузер учитывает больше факторов:</p>
+        <pre>
+scheme
+hostname / authority
+port
+HTTP version
+TLS certificate
+proxy settings
+network partitioning
+состояние соединения
+лимиты браузера
+возможность connection coalescing</pre
+        >
+        <p>Для собеседования обычно достаточно сказать:</p>
+        <blockquote>
+          <p>
+            Браузер проверяет, есть ли уже открытое соединение к подходящему
+            origin/authority. Если есть — использует его, если нет — открывает
+            новое.
+          </p>
+        </blockquote>
+      </section>
+
+      <section>
+        <h2>5. Ветка: «Переиспользовать TCP/TLS/QUIC соединение»</h2>
+
+        <h3>Что происходит</h3>
+        <p>
+          Если подходящее соединение уже существует, браузер не открывает новое.
+        </p>
+        <pre>
+Есть переиспользуемое соединение?
+→ Yes
+→ Переиспользовать TCP/TLS/QUIC соединение</pre
+        >
+        <p>Пример:</p>
+        <pre>
+браузер загрузил HTML с https://example.com
+HTML ссылается на /style.css и /app.js
+если соединение к example.com:443 ещё открыто,
+браузер может использовать его для следующих ресурсов</pre
+        >
+
+        <h3>Что такое TCP</h3>
+        <p>
+          <strong>TCP</strong> — <strong>Transmission Control Protocol</strong>.
+        </p>
+        <p>
+          TCP — транспортный протокол, который обеспечивает надёжную доставку
+          данных между двумя узлами.
+        </p>
+        <p>
+          Он используется как транспортная основа для HTTP/1.1 и HTTP/2 в
+          типичных браузерных сценариях.
+        </p>
+
+        <h3>Что такое TLS</h3>
+        <p><strong>TLS</strong> — <strong>Transport Layer Security</strong>.</p>
+        <p>TLS обеспечивает защищённое соединение поверх недоверенной сети.</p>
+        <p>Он даёт:</p>
+        <pre>
+шифрование
+проверку подлинности сервера
+защиту целостности данных</pre
+        >
+        <p>HTTPS — это HTTP, защищённый TLS.</p>
+
+        <h3>Что такое QUIC</h3>
+        <p><strong>QUIC</strong> — транспортный протокол поверх UDP.</p>
+        <p>QUIC включает:</p>
+        <pre>
+защищённость
+потоки
+multiplexing
+flow control
+connection migration
+низкую задержку установки соединения</pre
+        >
+        <p>HTTP/3 работает поверх QUIC.</p>
+      </section>
+
+      <section>
+        <h2>6. Ветка: «Открыть TCP/TLS или QUIC соединение»</h2>
+
+        <h3>Что происходит</h3>
+        <p>Если подходящего соединения нет, браузер открывает новое.</p>
+        <pre>
+Есть переиспользуемое соединение?
+→ No
+→ Открыть TCP/TLS или QUIC соединение</pre
+        >
+        <p>
+          Выбор зависит от схемы URL, поддержки сервера, поддержки браузера и
+          доступного HTTP-протокола.
+        </p>
+
+        <h3>HTTPS через TCP + TLS</h3>
+        <p>Для обычного HTTPS поверх TCP упрощённая цепочка такая:</p>
+        <pre>
+DNS → IP
+TCP handshake
+TLS handshake
+соединение готово</pre
+        >
+
+        <h3>TCP handshake</h3>
+        <p>TCP handshake — процедура установления TCP-соединения.</p>
+        <p>Упрощённо:</p>
+        <pre>
+client → SYN
+server → SYN-ACK
+client → ACK</pre
+        >
+        <p>После этого TCP-соединение считается установленным.</p>
+
+        <h3>TLS handshake</h3>
+        <p>TLS handshake — процедура установки защищённого соединения.</p>
+        <p>На этом этапе браузер и сервер:</p>
+        <pre>
+согласуют параметры шифрования
+проверяют сертификат сервера
+получают ключи для защищённой передачи</pre
+        >
+        <p>
+          После успешного TLS handshake можно безопасно передавать HTTP-данные.
+        </p>
+
+        <h3>HTTP/3 через QUIC</h3>
+        <p>Если используется HTTP/3, браузер открывает QUIC-соединение.</p>
+        <p>Упрощённо:</p>
+        <pre>
+DNS → IP
+QUIC connection setup
+соединение готово</pre
+        >
+        <p>
+          QUIC работает поверх UDP и включает встроенную защиту соединения.
+          Поэтому для HTTP/3 не используется отдельная TCP-связка.
+        </p>
+
+        <h3>Как браузер выбирает TCP/TLS или QUIC</h3>
+        <p>Браузер может использовать HTTP/3, если:</p>
+        <pre>
+браузер поддерживает HTTP/3
+сервер поддерживает HTTP/3
+браузер знает, что сервер поддерживает HTTP/3
+сеть не блокирует UDP/QUIC</pre
+        >
+        <p>
+          Если HTTP/3 не используется, для HTTPS обычно применяется TCP + TLS.
+        </p>
+      </section>
+
+      <section>
+        <h2>7. Как выглядит вся третья ветка</h2>
+
+        <h3>IP уже известен</h3>
+        <pre>
+локального ответа нет
+→ IP для hostname уже известен
+→ проверить переиспользуемое соединение
+   ├─ соединение есть
+   │  → переиспользовать TCP/TLS/QUIC соединение
+   │
+   └─ соединения нет
+      → открыть TCP/TLS или QUIC соединение</pre
+        >
+
+        <h3>IP неизвестен</h3>
+        <pre>
+локального ответа нет
+→ IP для hostname неизвестен
+→ DNS Resolution
+→ получить IP
+→ проверить переиспользуемое соединение
+   ├─ соединение есть
+   │  → переиспользовать TCP/TLS/QUIC соединение
+   │
+   └─ соединения нет
+      → открыть TCP/TLS или QUIC соединение</pre
+        >
+      </section>
+
+      <section>
+        <h2>8. Что важно не перепутать</h2>
+
+        <h3>DNS не получает HTML</h3>
+        <p>DNS не загружает страницу и не получает HTML.</p>
+        <p>DNS только помогает получить IP-адрес по hostname:</p>
+        <pre>example.com → IP</pre>
+
+        <h3>DNS не знает path и query</h3>
+        <p>DNS не обрабатывает:</p>
+        <pre>
+/products
+?page=2
+#reviews</pre
+        >
+        <p>Он работает только с именем:</p>
+        <pre>example.com</pre>
+
+        <h3>IP не равен серверному маршруту</h3>
+        <p>
+          IP указывает, куда подключиться на сетевом уровне. А
+          <code>path</code> и <code>query</code> будут важны позже, когда
+          браузер сформирует HTTP Request.
+        </p>
+
+        <h3>Переиспользуемое соединение не равно кэшу</h3>
+        <p>Кэш — это сохранённый response.</p>
+        <p>Переиспользуемое соединение — это уже открытый сетевой канал.</p>
+        <pre>
+HTTP Cache → можно ли не идти в сеть за response
+Connection reuse → можно ли не открывать новое соединение</pre
+        >
+
+        <h3>QUIC не является «просто TCP быстрее»</h3>
+        <p>
+          QUIC не использует TCP. Он работает поверх UDP и реализует собственные
+          механизмы потоков, защиты, контроля потока и восстановления.
+        </p>
+      </section>
+
+      <section>
+        <h2>9. Мини-глоссарий</h2>
+
+        <h3>Hostname</h3>
+        <p>Имя хоста из URL, например <code>example.com</code>.</p>
+
+        <h3>IP address</h3>
+        <p>Сетевой адрес устройства или сервера. Бывает IPv4 или IPv6.</p>
+
+        <h3>DNS</h3>
+        <p>
+          Domain Name System — система сопоставления доменных имён с IP-адресами
+          и другими записями.
+        </p>
+
+        <h3>DNS Resolution</h3>
+        <p>Процесс получения IP-адреса по hostname.</p>
+
+        <h3>DNS lookup</h3>
+        <p>Операция поиска DNS-записей для доменного имени.</p>
+
+        <h3>DNS cache</h3>
+        <p>Кэш результатов DNS lookup.</p>
+
+        <h3>TTL</h3>
+        <p>
+          Time To Live — время, в течение которого DNS-запись может считаться
+          актуальной в кэше.
+        </p>
+
+        <h3>A record</h3>
+        <p>DNS-запись, указывающая IPv4-адрес.</p>
+
+        <h3>AAAA record</h3>
+        <p>DNS-запись, указывающая IPv6-адрес.</p>
+
+        <h3>CNAME</h3>
+        <p>
+          Canonical Name record — DNS-запись, которая делает одно имя алиасом
+          другого.
+        </p>
+
+        <h3>TCP</h3>
+        <p>Transmission Control Protocol — надёжный транспортный протокол.</p>
+
+        <h3>TLS</h3>
+        <p>Transport Layer Security — протокол защиты соединения.</p>
+
+        <h3>HTTPS</h3>
+        <p>HTTP поверх TLS.</p>
+
+        <h3>QUIC</h3>
+        <p>Транспортный протокол поверх UDP, используемый HTTP/3.</p>
+
+        <h3>UDP</h3>
+        <p>
+          User Datagram Protocol — транспортный протокол без установки
+          TCP-соединения; QUIC работает поверх UDP.
+        </p>
+
+        <h3>Persistent connection</h3>
+        <p>
+          Соединение, которое остаётся открытым и может использоваться для
+          нескольких запросов.
+        </p>
+
+        <h3>Keep-Alive</h3>
+        <p>Идея сохранения соединения открытым для повторного использования.</p>
+
+        <h3>Multiplexing</h3>
+        <p>
+          Передача нескольких потоков запросов и ответов через одно соединение.
+        </p>
+
+        <h3>HTTP/2</h3>
+        <p>
+          Версия HTTP, которая поддерживает multiplexing поверх одного
+          соединения.
+        </p>
+
+        <h3>HTTP/3</h3>
+        <p>Версия HTTP, которая работает поверх QUIC.</p>
+      </section>
+
+      <section>
+        <h2>Источники</h2>
+        <ul>
+          <li>
+            <a href="https://developer.mozilla.org/en-US/docs/Glossary/DNS"
+              >MDN — DNS glossary</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://developer.mozilla.org/en-US/docs/Learn_web_development/Howto/Web_mechanics/What_is_a_domain_name"
+              >MDN — What is a domain name?</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://developer.mozilla.org/en-US/docs/Learn_web_development/Getting_started/Web_standards/How_the_web_works"
+              >MDN — How the web works</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Connection_management_in_HTTP_1.x"
+              >MDN — Connection management in HTTP/1.x</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Transport_Layer_Security"
+              >MDN — Transport Layer Security</a
+            >
+          </li>
+          <li>
+            <a href="https://developer.mozilla.org/en-US/docs/Glossary/HTTPS"
+              >MDN — HTTPS glossary</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview"
+              >MDN — Overview of HTTP</a
+            >
+          </li>
+          <li>
+            <a href="https://www.rfc-editor.org/rfc/rfc9293"
+              >RFC 9293 — Transmission Control Protocol</a
+            >
+          </li>
+          <li>
+            <a href="https://datatracker.ietf.org/doc/html/rfc8446"
+              >RFC 8446 — TLS 1.3</a
+            >
+          </li>
+          <li>
+            <a href="https://datatracker.ietf.org/doc/html/rfc9000"
+              >RFC 9000 — QUIC</a
+            >
+          </li>
+          <li>
+            <a href="https://www.rfc-editor.org/rfc/rfc9114.html"
+              >RFC 9114 — HTTP/3</a
+            >
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
