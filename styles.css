@@ -1,0 +1,177 @@
+:root {
+  color-scheme: light;
+  --bg: #f7f8fb;
+  --surface: #ffffff;
+  --surface-muted: #f2f5f9;
+  --text: #18212f;
+  --text-soft: #536076;
+  --line: #d8e0ea;
+  --accent: #0b6bcb;
+  --accent-hover: #084f97;
+  --shadow: 0 14px 40px rgba(24, 33, 47, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.7;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top right, rgba(11, 107, 203, 0.08), transparent 28%),
+    linear-gradient(180deg, #fbfcfe 0%, var(--bg) 100%);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover,
+a:focus-visible {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.95em;
+}
+
+.container {
+  width: min(900px, calc(100% - 2rem));
+  margin: 0 auto;
+}
+
+.site-header {
+  padding: 3.5rem 0 2rem;
+}
+
+.site-footer {
+  padding: 1rem 0 3rem;
+  color: var(--text-soft);
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  color: var(--accent);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  line-height: 1.2;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+}
+
+h2 {
+  margin-top: 0;
+  font-size: 1.35rem;
+}
+
+.lead {
+  max-width: 70ch;
+  margin: 1rem 0 0;
+  color: var(--text-soft);
+  font-size: 1.08rem;
+}
+
+.card,
+.callout {
+  margin: 0 0 1.5rem;
+  padding: 1.5rem;
+  background: var(--surface);
+  border: 1px solid rgba(216, 224, 234, 0.9);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.callout {
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  border-left: 4px solid var(--accent);
+}
+
+.primary-link {
+  font-weight: 600;
+}
+
+.back-link {
+  font-weight: 600;
+}
+
+pre {
+  margin: 0;
+  padding: 1rem 1.125rem;
+  overflow-x: auto;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  line-height: 1.6;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.example-url {
+  margin: 0 0 1rem;
+  padding: 0.875rem 1rem;
+  background: var(--surface-muted);
+  border-radius: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+}
+
+th,
+td {
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: var(--surface-muted);
+}
+
+ul {
+  padding-left: 1.2rem;
+}
+
+@media (max-width: 640px) {
+  .site-header {
+    padding-top: 2.5rem;
+  }
+
+  .card,
+  .callout {
+    padding: 1.1rem;
+    border-radius: 14px;
+  }
+
+  th,
+  td {
+    padding: 0.7rem;
+  }
+}
