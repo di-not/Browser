@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ответ из Service Worker / Cache Storage / fallback в сеть</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>Ответ из Service Worker / Cache Storage / fallback в сеть</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко о блоке</h2>
+      <p>
+        Блок <strong>«Ответ из Service Worker / Cache Storage / fallback в сеть»</strong>
+        описывает ситуацию, когда браузер не сразу идёт напрямую в сеть за ресурсом,
+        а сначала передаёт запрос в <strong>Service Worker</strong>.
+      </p>
+      <p>Service Worker может решить, откуда взять ответ:</p>
+      <pre>Request
+→ Service Worker
+   ├─ вернуть Response из Cache Storage
+   ├─ сходить в сеть через fetch()
+   ├─ сначала попробовать кэш, потом сеть
+   ├─ сначала попробовать сеть, потом кэш
+   └─ вернуть fallback Response</pre>
+      <blockquote>
+        <p>
+          Service Worker — это программируемый слой между страницей и сетью. Он может
+          вернуть ответ из кэша, из сети или подготовить запасной ответ, если сеть
+          недоступна.
+        </p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Что такое Service Worker</h2>
+      <p>
+        <strong>Service Worker</strong> — это фоновый JavaScript worker, который
+        браузер запускает отдельно от страницы.
+      </p>
+      <p>
+        Он не имеет доступа к DOM, но может перехватывать запросы страницы через
+        <code>fetch</code> event.
+      </p>
+      <pre>страница делает запрос
+→ браузер видит, что страницу контролирует Service Worker
+→ запрос попадает в Service Worker
+→ Service Worker решает, какой Response вернуть</pre>
+      <p>Service Worker часто используется для:</p>
+      <ul>
+        <li>офлайн-режима;</li>
+        <li>кэширования ресурсов;</li>
+        <li>ускорения повторных загрузок;</li>
+        <li>fallback-страниц;</li>
+        <li>PWA-приложений.</li>
+      </ul>
+      <p>
+        Важно: Service Worker работает не всегда. Он должен быть зарегистрирован,
+        установлен, активирован и должен контролировать страницу в пределах своего
+        <code>scope</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>2. Что такое scope</h2>
+      <p><strong>Scope</strong> — это область URL, которую контролирует Service Worker.</p>
+      <p>Например:</p>
+      <pre><code>navigator.serviceWorker.register("/sw.js");</code></pre>
+      <p>
+        Если Service Worker зарегистрирован из корня сайта, он обычно может
+        контролировать весь сайт:
+      </p>
+      <pre>/</pre>
+      <p>Если он зарегистрирован из вложенного пути:</p>
+      <pre><code>navigator.serviceWorker.register("/app/sw.js");</code></pre>
+      <p>то область контроля обычно будет:</p>
+      <pre>/app/</pre>
+      <p>
+        Это значит, что запросы вне этой области не обязаны проходить через этот
+        Service Worker.
+      </p>
+    </section>
+
+    <section>
+      <h2>3. Что такое fetch event</h2>
+      <p>
+        <strong>fetch event</strong> — событие, которое возникает в Service Worker,
+        когда контролируемая страница делает запрос.
+      </p>
+      <p>
+        Это может быть не только явный <code>fetch()</code> из JavaScript, но и обычные
+        запросы браузера:
+      </p>
+      <pre>HTML document
+CSS
+JavaScript
+images
+fonts
+API requests</pre>
+      <p>Пример:</p>
+      <pre><code>self.addEventListener("fetch", (event) =&gt; {
+  event.respondWith(fetch(event.request));
+});</code></pre>
+      <p>
+        Здесь Service Worker перехватывает запрос, но просто передаёт его в сеть.
+      </p>
+    </section>
+
+    <section>
+      <h2>4. Что такое respondWith()</h2>
+      <p>
+        <code>respondWith()</code> — это метод, через который Service Worker говорит браузеру:
+      </p>
+      <pre>Для этого Request я сам предоставлю Response.</pre>
+      <p>Пример:</p>
+      <pre><code>self.addEventListener("fetch", (event) =&gt; {
+  event.respondWith(
+    caches.match(event.request)
+  );
+});</code></pre>
+      <p>
+        Но такой код опасен как полноценная стратегия: если в кэше ничего нет, ответ
+        будет <code>undefined</code>, и запрос завершится ошибкой.
+      </p>
+      <p>Обычно добавляют fallback:</p>
+      <pre><code>self.addEventListener("fetch", (event) =&gt; {
+  event.respondWith(
+    caches.match(event.request).then((cachedResponse) =&gt; {
+      return cachedResponse || fetch(event.request);
+    })
+  );
+});</code></pre>
+      <pre>проверить Cache Storage
+→ если Response найден, вернуть его
+→ если не найден, выполнить запрос в сеть</pre>
+    </section>
+
+    <section>
+      <h2>5. Что такое Cache Storage</h2>
+      <p>
+        <strong>Cache Storage</strong> — это браузерное хранилище, доступное через
+        Cache API.
+      </p>
+      <p>Оно хранит пары:</p>
+      <pre>Request → Response</pre>
+      <p>Пример:</p>
+      <pre><code>const cache = await caches.open("app-cache-v1");
+await cache.add("/styles.css");
+
+const response = await cache.match("/styles.css");</code></pre>
+      <p>Внутри это можно представить так:</p>
+      <pre>CacheStorage
+└─ app-cache-v1
+   ├─ /index.html → Response
+   ├─ /styles.css → Response
+   └─ /app.js     → Response</pre>
+      <p>
+        Service Worker часто использует Cache Storage, чтобы сохранить важные ресурсы
+        и вернуть их позже без сети.
+      </p>
+    </section>
+
+    <section>
+      <h2>6. Cache Storage — это не HTTP Cache</h2>
+      <p>Важно не путать два разных кэша.</p>
+
+      <h3>HTTP Cache</h3>
+      <p>HTTP Cache управляется браузером автоматически по HTTP-заголовкам:</p>
+      <pre>Cache-Control
+ETag
+Last-Modified
+Expires
+Vary</pre>
+      <p>Приложение влияет на него через заголовки ответа сервера.</p>
+
+      <h3>Cache Storage</h3>
+      <p>Cache Storage управляется JavaScript-кодом:</p>
+      <pre><code>cache.put(request, response)
+cache.match(request)
+cache.delete(request)</code></pre>
+      <p>Разработчик сам пишет стратегию:</p>
+      <pre>что положить в кэш
+когда читать из кэша
+когда идти в сеть
+когда обновлять кэш
+что показывать офлайн</pre>
+      <pre>HTTP Cache    → автоматический кэш браузера
+Cache Storage → программируемый кэш для Service Worker / Cache API</pre>
+    </section>
+
+    <section>
+      <h2>7. Основные варианты ответа Service Worker</h2>
+
+      <h3>Вариант 1. Ответ из Cache Storage</h3>
+      <p>Service Worker может вернуть уже сохранённый <code>response</code>.</p>
+      <pre>Request
+→ Service Worker
+→ Cache Storage
+→ cached Response</pre>
+      <pre><code>self.addEventListener("fetch", (event) =&gt; {
+  event.respondWith(
+    caches.match(event.request)
+  );
+});</code></pre>
+      <p>
+        Такой вариант быстрый и может работать офлайн. Но если ресурса нет в кэше,
+        нужен запасной путь.
+      </p>
+
+      <h3>Вариант 2. Cache-first: сначала кэш, потом сеть</h3>
+      <p>
+        <strong>Cache-first</strong> — стратегия, при которой Service Worker сначала
+        ищет ответ в Cache Storage, а в сеть идёт только при промахе.
+      </p>
+      <pre>Request
+→ Cache Storage
+   ├─ cache hit  → вернуть cached Response
+   └─ cache miss → fetch в сеть</pre>
+      <pre><code>self.addEventListener("fetch", (event) =&gt; {
+  event.respondWith(
+    caches.match(event.request).then((cachedResponse) =&gt; {
+      return cachedResponse || fetch(event.request);
+    })
+  );
+});</code></pre>
+      <p>Подходит для:</p>
+      <pre>CSS
+JS bundles
+fonts
+icons
+static images</pre>
+      <p>
+        Плюс: быстро. Минус: можно отдать устаревшую версию, если кэш не обновляется.
+      </p>
+
+      <h3>Вариант 3. Network-first: сначала сеть, потом кэш</h3>
+      <p>
+        <strong>Network-first</strong> — стратегия, при которой Service Worker сначала
+        пытается получить свежий ответ из сети, а если сеть недоступна, возвращает кэш.
+      </p>
+      <pre>Request
+→ fetch в сеть
+   ├─ успех  → вернуть свежий Response
+   └─ ошибка → вернуть cached Response</pre>
+      <pre><code>self.addEventListener("fetch", (event) =&gt; {
+  event.respondWith(
+    fetch(event.request).catch(() =&gt; {
+      return caches.match(event.request);
+    })
+  );
+});</code></pre>
+      <p>Подходит для:</p>
+      <pre>HTML pages
+API data
+данные, где свежесть важнее скорости</pre>
+      <p>
+        Плюс: если сеть есть, пользователь получает свежий ответ. Минус: при медленной
+        сети ответ может быть медленнее.
+      </p>
+
+      <h3>Вариант 4. Fallback response</h3>
+      <p>
+        <strong>Fallback response</strong> — запасной ответ, который используется,
+        если основной путь не сработал.
+      </p>
+      <pre>Request navigation page
+→ fetch в сеть
+→ ошибка
+→ вернуть /offline.html из кэша</pre>
+      <pre><code>self.addEventListener("fetch", (event) =&gt; {
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request).catch(() =&gt; {
+        return caches.match("/offline.html");
+      })
+    );
+  }
+});</code></pre>
+      <p>
+        Fallback нужен, чтобы пользователь не видел просто браузерную ошибку сети.
+      </p>
+      <p>Вместо этого можно показать:</p>
+      <pre>offline.html
+заглушку изображения
+кэшированную старую страницу
+сообщение "нет соединения"</pre>
+
+      <h3>Вариант 5. Сеть как fallback</h3>
+      <p>Фраза <strong>«fallback в сеть»</strong> может означать обратную стратегию:</p>
+      <pre>сначала кэш
+→ если в кэше нет ответа
+→ сходить в сеть</pre>
+      <p>То есть сеть становится запасным вариантом после Cache Storage.</p>
+      <pre><code>caches.match(event.request).then((cachedResponse) =&gt; {
+  return cachedResponse || fetch(event.request);
+});</code></pre>
+      <pre>если есть локальный ответ — использовать его
+если локального ответа нет — продолжить обычный сетевой путь</pre>
+    </section>
+
+    <section>
+      <h2>8. Что значит Response-like результат</h2>
+      <p>
+        Иногда Service Worker возвращает ответ, который не был получен от сервера
+        прямо сейчас.
+      </p>
+      <p>Например:</p>
+      <pre><code>return new Response("&lt;h1&gt;Offline&lt;/h1&gt;", {
+  headers: { "Content-Type": "text/html" },
+  status: 200
+});</code></pre>
+      <p>
+        Такой ответ создан JavaScript-кодом, но для браузера он всё равно похож на
+        обычный HTTP response:
+      </p>
+      <pre>status
+headers
+body</pre>
+      <p>Поэтому дальше браузер может обрабатывать его как результат запроса.</p>
+    </section>
+
+    <section>
+      <h2>9. Как этот блок связан с общей схемой</h2>
+      <p>До этого браузер уже разобрал URL:</p>
+      <pre>scheme, host, port, path, query</pre>
+      <p>После этого он проверяет:</p>
+      <pre>Можно использовать локальный ответ?</pre>
+      <p>Если запрос попадает в Service Worker, возможны варианты:</p>
+      <pre>Service Worker
+├─ вернул Response из Cache Storage
+│  → сеть не нужна
+│
+├─ вернул fallback Response
+│  → сеть не нужна или сеть уже упала
+│
+└─ вызвал fetch(event.request)
+   → запрос возвращается в сетевой pipeline</pre>
+      <blockquote>
+        <p>
+          Service Worker не обязательно отменяет сеть. Он может либо завершить запрос
+          локально, либо передать его дальше в сеть.
+        </p>
+      </blockquote>
+    </section>
+
+    <section>
+      <h2>10. Мини-глоссарий</h2>
+
+      <h3>Service Worker</h3>
+      <p>
+        Фоновый JavaScript worker, который может перехватывать запросы, работать с
+        кэшем и возвращать собственные ответы.
+      </p>
+
+      <h3>Scope</h3>
+      <p>Область URL, которую контролирует Service Worker.</p>
+
+      <h3>Fetch event</h3>
+      <p>Событие Service Worker, возникающее при запросе контролируемой страницы.</p>
+
+      <h3>respondWith()</h3>
+      <p>Метод, которым Service Worker задаёт ответ для перехваченного запроса.</p>
+
+      <h3>Cache Storage</h3>
+      <p>Программируемое хранилище <code>Request → Response</code>, доступное через Cache API.</p>
+
+      <h3>Cache API</h3>
+      <p>
+        Набор браузерных API для открытия кэшей, сохранения response и поиска response
+        по request.
+      </p>
+
+      <h3>Request</h3>
+      <p>Объект, представляющий запрос.</p>
+
+      <h3>Response</h3>
+      <p>Объект, представляющий ответ: status, headers и body.</p>
+
+      <h3>Cache-first</h3>
+      <p>Стратегия: сначала кэш, если промах — сеть.</p>
+
+      <h3>Network-first</h3>
+      <p>Стратегия: сначала сеть, если ошибка — кэш.</p>
+
+      <h3>Fallback</h3>
+      <p>Запасной ответ или запасной путь, если основной способ не сработал.</p>
+
+      <h3>Offline fallback</h3>
+      <p>Fallback-ответ для ситуации, когда сеть недоступна.</p>
+
+      <h3>PWA</h3>
+      <p>
+        Progressive Web App — веб-приложение, которое может использовать возможности
+        вроде Service Worker, офлайн-режима и установки на устройство.
+      </p>
+    </section>
+
+    <section>
+      <h2>Источники</h2>
+      <ul>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API">MDN — Service Worker API</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers">MDN — Using Service Workers</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerGlobalScope/fetch_event">MDN — ServiceWorkerGlobalScope: fetch event</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/CacheStorage">MDN — CacheStorage</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Cache">MDN — Cache</a></li>
+        <li><a href="https://web.dev/articles/offline-cookbook">web.dev — Offline Cookbook</a></li>
+        <li><a href="https://web.dev/articles/offline-fallback-page">web.dev — Offline fallback page</a></li>
+        <li><a href="https://web.dev/articles/service-worker-caching-and-http-caching">web.dev — Service worker caching and HTTP caching</a></li>
+        <li><a href="https://developer.chrome.com/docs/workbox/managing-fallback-responses">Workbox — Managing fallback responses</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>Простая статья без декоративных карточек, подходит для локального открытия и GitHub Pages.</p>
+    </div>
+  </footer>
+</body>
+</html>
