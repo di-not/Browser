@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HTTP Response — ответ</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>HTTP Response — ответ</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко о блоке</h2>
+      <p>
+        <strong>HTTP Response</strong> — это сообщение, которое сервер возвращает
+        клиенту в ответ на HTTP Request.
+      </p>
+      <p>В общей схеме:</p>
+      <pre>HTTP Request — запрос
+→ HTTP Response — ответ
+→ Что вернул сервер?</pre>
+      <p>Response определяет дальнейшую ветку браузера:</p>
+      <pre>Redirect 3xx
+→ Перейти по Location
+
+Ошибка / сбой сети
+→ Страница ошибки браузера или error document
+
+JSON / API / ресурс
+→ Передать ответ инициатору запроса
+
+HTML document / app shell
+→ Получен HTML document / app shell</pre>
+      <blockquote>
+        <p>
+          HTTP Response — это не обязательно HTML-страница. Это может быть HTML, CSS,
+          JavaScript, JSON, изображение, шрифт, redirect, ошибка, 304 для кэша
+          или ответ без body.
+        </p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Из чего состоит HTTP Response</h2>
+      <p>Логически HTTP Response содержит:</p>
+      <pre>status code
+status text / reason phrase
+headers
+optional body</pre>
+      <p>Пример HTTP/1.1 response:</p>
+      <pre><code>HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+Cache-Control: max-age=0
+Content-Encoding: br
+Set-Cookie: session=abc; HttpOnly; Secure
+
+<!doctype html>
+&lt;html&gt;...&lt;/html&gt;</code></pre>
+      <p>Упрощённая структура:</p>
+      <pre>status line
+headers
+empty line
+optional body</pre>
+      <p>
+        В HTTP/2 и HTTP/3 ответ передаётся не как текстовая строка
+        <code>HTTP/1.1 200 OK</code>, а через фреймы и pseudo-header:
+      </p>
+      <pre><code>:status: 200
+content-type: text/html; charset=utf-8
+cache-control: max-age=0</code></pre>
+      <p>Семантика остаётся той же:</p>
+      <pre>status
+headers
+body</pre>
+    </section>
+
+    <section>
+      <h2>2. Status code</h2>
+      <p>
+        <strong>Status code</strong> — трёхзначный код, который сообщает результат
+        обработки запроса.
+      </p>
+      <p>Классы кодов:</p>
+      <pre>1xx → informational — информационные ответы
+2xx → successful — успешные ответы
+3xx → redirection — перенаправления
+4xx → client error — ошибка на стороне клиента / запроса
+5xx → server error — ошибка на стороне сервера</pre>
+      <p>Важно:</p>
+      <pre>status code сам по себе не говорит, что body является HTML.
+Для понимания типа данных важен Content-Type.</pre>
+      <p>Например:</p>
+      <pre><code>HTTP/1.1 200 OK
+Content-Type: application/json</code></pre>
+      <p>Это успешный ответ, но не HTML-документ.</p>
+    </section>
+
+    <section>
+      <h2>3. Частые status codes</h2>
+
+      <h3>1xx — информационные ответы</h3>
+      <p><strong>100 Continue</strong></p>
+      <p>
+        Сервер сообщает клиенту, что начальная часть запроса получена и можно
+        продолжать отправку body.
+      </p>
+      <p><strong>101 Switching Protocols</strong></p>
+      <p>
+        Сервер соглашается переключить протокол. Классический пример — переход
+        с HTTP на WebSocket через механизм <code>Upgrade</code>.
+      </p>
+      <p><strong>103 Early Hints</strong></p>
+      <p>
+        Сервер заранее отправляет подсказки, обычно через <code>Link</code> headers,
+        чтобы браузер мог раньше начать загрузку важных ресурсов.
+      </p>
+
+      <h3>2xx — успешные ответы</h3>
+      <p><strong>200 OK</strong></p>
+      <p>
+        Запрос успешно обработан. Для обычной навигации часто означает, что сервер
+        вернул HTML-документ, но <code>200 OK</code> может вернуть и JSON, CSS, JS,
+        изображение или другой ресурс. Тип определяется <code>Content-Type</code>.
+      </p>
+      <p><strong>201 Created</strong></p>
+      <p>
+        Запрос успешно выполнен, и на сервере был создан новый ресурс.
+      </p>
+      <p><strong>202 Accepted</strong></p>
+      <p>
+        Запрос принят, но обработка ещё не завершена. Подходит для асинхронных операций.
+      </p>
+      <p><strong>204 No Content</strong></p>
+      <p>
+        Запрос успешно обработан, но body ответа нет.
+      </p>
+      <p><strong>206 Partial Content</strong></p>
+      <p>
+        Сервер вернул только часть ресурса. Используется с range requests.
+      </p>
+
+      <h3>3xx — перенаправления</h3>
+      <p><strong>301 Moved Permanently</strong></p>
+      <p>
+        Ресурс окончательно перенесён на новый URL. Сервер обычно отправляет
+        <code>Location</code>, а браузер переходит по этому адресу.
+      </p>
+      <p><strong>302 Found</strong></p>
+      <p>
+        Временное перенаправление.
+      </p>
+      <p><strong>303 See Other</strong></p>
+      <p>
+        Сервер говорит клиенту получить результат по другому URL, обычно методом <code>GET</code>.
+      </p>
+      <p><strong>304 Not Modified</strong></p>
+      <p>
+        Ресурс не изменился с момента последней сохранённой версии. У ответа нет нового
+        body ресурса: браузер использует body из HTTP Cache.
+      </p>
+      <p><strong>307 Temporary Redirect</strong></p>
+      <p>
+        Временный redirect, при котором клиент должен сохранить исходный HTTP method и body.
+      </p>
+      <p><strong>308 Permanent Redirect</strong></p>
+      <p>
+        Постоянный redirect, при котором клиент тоже должен сохранить method и body.
+      </p>
+
+      <h3>4xx — ошибки клиента / запроса</h3>
+      <p><strong>400 Bad Request</strong></p>
+      <p>Сервер не может обработать запрос из-за ошибки в самом запросе.</p>
+      <p><strong>401 Unauthorized</strong></p>
+      <p>Запрос требует аутентификации.</p>
+      <p><strong>403 Forbidden</strong></p>
+      <p>Сервер понял запрос, но отказывается его выполнять.</p>
+      <p><strong>404 Not Found</strong></p>
+      <p>
+        Сервер не нашёл ресурс по указанному URL. Важно: <code>404</code> — это HTTP Response,
+        а не отсутствие ответа.
+      </p>
+      <p><strong>405 Method Not Allowed</strong></p>
+      <p>Метод запроса не разрешён для этого ресурса.</p>
+      <p><strong>408 Request Timeout</strong></p>
+      <p>Сервер не дождался полного запроса от клиента за допустимое время.</p>
+      <p><strong>409 Conflict</strong></p>
+      <p>Запрос конфликтует с текущим состоянием ресурса.</p>
+      <p><strong>410 Gone</strong></p>
+      <p>Ресурс раньше существовал, но теперь удалён и больше не доступен.</p>
+      <p><strong>415 Unsupported Media Type</strong></p>
+      <p>Сервер не поддерживает формат body, который отправил клиент.</p>
+      <p><strong>422 Unprocessable Content</strong></p>
+      <p>
+        Сервер понял формат запроса, но не может обработать данные по смыслу.
+      </p>
+      <p><strong>429 Too Many Requests</strong></p>
+      <p>Клиент отправил слишком много запросов за короткое время.</p>
+
+      <h3>5xx — ошибки сервера</h3>
+      <p><strong>500 Internal Server Error</strong></p>
+      <p>Общая ошибка сервера.</p>
+      <p><strong>501 Not Implemented</strong></p>
+      <p>Сервер не поддерживает функциональность, нужную для обработки запроса.</p>
+      <p><strong>502 Bad Gateway</strong></p>
+      <p>Gateway или proxy получил некорректный ответ от upstream server.</p>
+      <p><strong>503 Service Unavailable</strong></p>
+      <p>Сервис временно недоступен.</p>
+      <p><strong>504 Gateway Timeout</strong></p>
+      <p>Gateway или proxy не дождался ответа от upstream server.</p>
+    </section>
+
+    <section>
+      <h2>4. Response headers</h2>
+      <p>
+        <strong>Response headers</strong> — метаданные ответа. Они помогают браузеру
+        понять, как обрабатывать response.
+      </p>
+      <p>Примеры:</p>
+      <pre><code>Content-Type: text/html; charset=utf-8
+Content-Length: 10240
+Content-Encoding: br
+Cache-Control: max-age=3600
+ETag: "abc123"
+Location: /login
+Set-Cookie: session=abc; HttpOnly; Secure</code></pre>
+
+      <h3>Content-Type</h3>
+      <p>
+        <code>Content-Type</code> указывает media type возвращаемых данных.
+      </p>
+      <pre>text/html              → HTML document / app shell
+application/json       → данные для fetch/API
+text/css               → stylesheet
+application/javascript → script
+image/png              → image resource
+font/woff2             → font resource</pre>
+
+      <h3>Content-Length</h3>
+      <p>
+        <code>Content-Length</code> указывает размер body в байтах, если он известен.
+      </p>
+
+      <h3>Content-Encoding</h3>
+      <p>
+        <code>Content-Encoding</code> указывает, как сжато body, например
+        <code>br</code> или <code>gzip</code>.
+      </p>
+
+      <h3>Cache-Control</h3>
+      <p>
+        <code>Cache-Control</code> задаёт правила кэширования response.
+      </p>
+
+      <h3>ETag</h3>
+      <p>
+        <code>ETag</code> — идентификатор версии ресурса. Используется для revalidation.
+      </p>
+
+      <h3>Location</h3>
+      <p>
+        <code>Location</code> указывает URL для redirect.
+      </p>
+
+      <h3>Set-Cookie</h3>
+      <p>
+        <code>Set-Cookie</code> — header, через который сервер просит браузер сохранить cookie.
+      </p>
+    </section>
+
+    <section>
+      <h2>5. Body ответа</h2>
+      <p><strong>Body</strong> — полезная нагрузка HTTP Response.</p>
+      <p>Примеры body:</p>
+      <pre>HTML document
+CSS stylesheet
+JavaScript file
+JSON data
+image bytes
+font bytes
+empty body</pre>
+      <p>Body может отсутствовать, например:</p>
+      <pre>204 No Content
+304 Not Modified
+response на HEAD request</pre>
+    </section>
+
+    <section>
+      <h2>6. Что вернул сервер? Четыре основные ветки</h2>
+      <p>
+        После получения HTTP Response браузер или инициатор запроса классифицирует результат.
+      </p>
+      <pre>HTTP Response
+→ Что вернул сервер?
+   ├─ Redirect 3xx
+   │  → Перейти по Location
+   │
+   ├─ Ошибка / сбой сети
+   │  → Страница ошибки браузера или error document
+   │
+   ├─ JSON / API / ресурс
+   │  → Передать ответ инициатору запроса
+   │
+   └─ HTML document / app shell
+      → Получен HTML document / app shell</pre>
+
+      <h3>6.1. Перейти по Location</h3>
+      <p>
+        Эта ветка срабатывает, когда сервер вернул redirect status code:
+        <code>301</code>, <code>302</code>, <code>303</code>, <code>307</code>, <code>308</code>.
+      </p>
+      <p>Обычно response содержит header:</p>
+      <pre><code>Location: https://example.com/new-url</code></pre>
+      <p>Логика:</p>
+      <pre>сервер ответил redirect
+→ браузер читает Location
+→ строит новый URL
+→ снова проходит URL parsing
+→ снова может быть cache / DNS / connection / request / response</pre>
+      <p>Важно:</p>
+      <pre>redirect — это не рендер страницы,
+а команда начать новый переход.</pre>
+      <p>
+        Также важно различать <code>302/303</code> и <code>307/308</code>:
+        <code>307</code> и <code>308</code> сохраняют исходный method и body при redirect,
+        а <code>303</code> обычно ведёт к последующему <code>GET</code>.
+      </p>
+
+      <h3>6.2. Страница ошибки браузера или error document</h3>
+      <p>Эта ветка покрывает два разных случая.</p>
+      <p><strong>HTTP error document</strong></p>
+      <p>
+        Сервер вернул HTTP Response со статусом ошибки: обычно <code>4xx</code> или <code>5xx</code>.
+      </p>
+      <p>Пример:</p>
+      <pre><code>HTTP/1.1 404 Not Found
+Content-Type: text/html
+
+&lt;html&gt;Страница не найдена&lt;/html&gt;</code></pre>
+      <p>
+        Это нормальный HTTP Response. Если body является HTML, браузер может отрендерить
+        страницу ошибки, которую прислал сервер.
+      </p>
+      <p>Примеры:</p>
+      <pre>404 Not Found → серверная страница "не найдено"
+500 Internal Server Error → серверная страница ошибки
+503 Service Unavailable → страница временной недоступности</pre>
+      <p><strong>Browser error page / network error</strong></p>
+      <p>Иногда нормального HTTP Response вообще нет.</p>
+      <p>Примеры:</p>
+      <pre>DNS failure
+connection refused
+TLS certificate error
+timeout
+connection reset
+network offline</pre>
+      <p>
+        В этом случае серверный HTML не получен. Браузер показывает собственную страницу ошибки.
+      </p>
+      <p>Разница:</p>
+      <pre>404 / 500 → HTTP Response есть
+DNS/TLS/timeout error → нормального HTTP Response нет</pre>
+
+      <h3>6.3. Передать ответ инициатору запроса</h3>
+      <p>
+        Эта ветка используется, когда response не является основным HTML-документом
+        навигации, а был запрошен конкретным механизмом.
+      </p>
+      <p>Инициатором может быть:</p>
+      <pre>fetch()
+XMLHttpRequest
+script loader
+CSS loader
+image loader
+font loader
+preload scanner
+Service Worker</pre>
+      <p>Примеры:</p>
+      <pre>fetch("/api/users") → response передаётся JavaScript-коду
+&lt;script src="/app.js"&gt; → response передаётся JS engine / script loader
+&lt;link rel="stylesheet" href="/style.css"&gt; → response передаётся CSS loader
+&lt;img src="/logo.png"&gt; → response передаётся image decoder</pre>
+      <p>Пример JSON response:</p>
+      <pre><code>HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"items":[]}</code></pre>
+      <p>
+        Браузер не строит DOM из такого response. Он передаёт данные механизму,
+        который сделал запрос.
+      </p>
+      <p>Для <code>fetch()</code> JavaScript может обработать response так:</p>
+      <pre><code>const response = await fetch("/api/users");
+const data = await response.json();</code></pre>
+
+      <h3>6.4. Получен HTML document / app shell</h3>
+      <p>
+        Эта ветка срабатывает, когда response является HTML-документом для навигации.
+      </p>
+      <p>Типичный response:</p>
+      <pre><code>HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+
+<!doctype html>
+&lt;html&gt;
+  ...
+&lt;/html&gt;</code></pre>
+      <p>После этого браузер переходит к document pipeline:</p>
+      <pre>HTML_RECEIVED
+→ HTML Parser
+→ DOM
+→ preload scanner
+→ загрузка CSS/JS/images/fonts
+→ CSSOM
+→ выполнение scripts
+→ rendering pipeline</pre>
+      <p><strong>HTML document</strong></p>
+      <p>
+        Обычный HTML document может содержать уже готовую разметку.
+      </p>
+      <p><strong>App shell</strong></p>
+      <p>
+        <strong>App shell</strong> — минимальная HTML-оболочка приложения.
+      </p>
+      <p>Например, для React SPA:</p>
+      <pre><code><!doctype html>
+&lt;html&gt;
+  &lt;body&gt;
+    &lt;div id="root"&gt;&lt;/div&gt;
+    &lt;script src="/app.js"&gt;&lt;/script&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</code></pre>
+      <p>
+        Сам по себе app shell может содержать мало контента. Основной интерфейс
+        появится после загрузки и выполнения JavaScript bundle.
+      </p>
+      <p><strong>Next.js / SSR / streaming</strong></p>
+      <p>Для Next.js response может быть:</p>
+      <pre>server-rendered HTML
+static generated HTML
+HTML + __NEXT_DATA__
+streaming HTML
+app shell + RSC payload</pre>
+      <p>Но для браузера на этом этапе главное:</p>
+      <pre>получен response с HTML
+→ можно начинать HTML parsing</pre>
+    </section>
+
+    <section>
+      <h2>7. Что важно не перепутать</h2>
+      <p><strong>HTTP error не равен network error</strong></p>
+      <pre>404 / 500 → HTTP Response есть
+DNS failure / TLS error / timeout → нормального HTTP Response нет</pre>
+      <p><strong>200 OK не означает HTML</strong></p>
+      <pre><code>HTTP/1.1 200 OK
+Content-Type: application/json</code></pre>
+      <p>Это успешный ответ, но не HTML-документ.</p>
+      <p><strong>304 не содержит новый body</strong></p>
+      <p><code>304 Not Modified</code> говорит браузеру использовать body из HTTP Cache.</p>
+      <p><strong>Redirect запускает новый проход</strong></p>
+      <p>Redirect не завершает загрузку страницы. Он создаёт новый переход по <code>Location</code>.</p>
+      <p><strong>Content-Type определяет интерпретацию body</strong></p>
+      <p>Расширение URL менее важно, чем headers и контекст запроса.</p>
+    </section>
+
+    <section>
+      <h2>8. Мини-глоссарий</h2>
+
+      <h3>HTTP Response</h3>
+      <p>Сообщение сервера клиенту в ответ на HTTP Request.</p>
+
+      <h3>Status code</h3>
+      <p>Трёхзначный код результата запроса.</p>
+
+      <h3>1xx</h3>
+      <p>Информационные ответы.</p>
+
+      <h3>2xx</h3>
+      <p>Успешные ответы.</p>
+
+      <h3>3xx</h3>
+      <p>Перенаправления.</p>
+
+      <h3>4xx</h3>
+      <p>Ошибки клиента или запроса.</p>
+
+      <h3>5xx</h3>
+      <p>Ошибки сервера.</p>
+
+      <h3>Header</h3>
+      <p>Метаданные HTTP-сообщения.</p>
+
+      <h3>Body</h3>
+      <p>Полезная нагрузка ответа.</p>
+
+      <h3>Content-Type</h3>
+      <p>Header, который указывает media type возвращаемого ресурса.</p>
+
+      <h3>Content-Encoding</h3>
+      <p>Header, который указывает способ сжатия body.</p>
+
+      <h3>Cache-Control</h3>
+      <p>Header, задающий правила кэширования.</p>
+
+      <h3>ETag</h3>
+      <p>Идентификатор версии ресурса.</p>
+
+      <h3>Location</h3>
+      <p>Header, указывающий URL для redirect.</p>
+
+      <h3>Set-Cookie</h3>
+      <p>Header, через который сервер устанавливает cookie.</p>
+
+      <h3>304 Not Modified</h3>
+      <p>Status, означающий, что ресурс не изменился и можно использовать cached body.</p>
+
+      <h3>Error document</h3>
+      <p>HTML или другой документ ошибки, который сервер вернул как HTTP Response.</p>
+
+      <h3>Browser error page</h3>
+      <p>Страница ошибки, которую показывает сам браузер, когда нормальный HTTP Response не получен.</p>
+
+      <h3>App shell</h3>
+      <p>Минимальная HTML-оболочка приложения, которая загружает клиентский JavaScript.</p>
+    </section>
+
+    <section>
+      <h2>Источники</h2>
+      <ul>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview">MDN — Overview of HTTP</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Messages">MDN — HTTP messages</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status">MDN — HTTP response status codes</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers">MDN — HTTP headers</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Type">MDN — Content-Type</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie">MDN — Set-Cookie</a></li>
+        <li><a href="https://www.rfc-editor.org/rfc/rfc9110.html">RFC 9110 — HTTP Semantics</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
