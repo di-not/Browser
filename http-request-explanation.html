@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HTTP Request — запрос</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>HTTP Request — запрос</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко о блоке</h2>
+      <p>
+        <strong>HTTP Request</strong> — это сообщение, которое клиент отправляет
+        серверу. В сценарии браузера клиентом обычно является браузер, а сервером —
+        origin server, CDN, reverse proxy или другой HTTP-сервер на пути запроса.
+      </p>
+      <p>В общей схеме этот блок идёт после подготовки соединения:</p>
+      <pre>Переиспользовать TCP/TLS/QUIC соединение
+или
+Открыть TCP/TLS или QUIC соединение
+→ HTTP Request — запрос</pre>
+      <p>На этом этапе браузер уже знает:</p>
+      <pre>scheme
+host / authority
+port
+path
+query</pre>
+      <p>и может сформировать HTTP-запрос.</p>
+      <blockquote>
+        <p>
+          HTTP Request — это не «страница открылась», а конкретное сообщение от
+          клиента к серверу: что нужно получить или сделать, к какому ресурсу
+          обратиться, какие метаданные передать и, иногда, какое тело запроса отправить.
+        </p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. HTTP как request-response протокол</h2>
+      <p>HTTP работает по модели request-response:</p>
+      <pre>client → HTTP Request → server
+client ← HTTP Response ← server</pre>
+      <p>
+        Для навигации по URL браузер обычно отправляет request, а сервер возвращает response.
+      </p>
+      <p>Примеры HTTP-клиентов:</p>
+      <pre>браузер
+fetch() в JavaScript
+curl
+мобильное приложение
+серверное приложение</pre>
+      <p>Примеры серверной стороны:</p>
+      <pre>origin server
+CDN
+reverse proxy
+backend service
+edge server</pre>
+    </section>
+
+    <section>
+      <h2>2. Из чего состоит HTTP Request</h2>
+      <p>Логически HTTP Request содержит:</p>
+      <pre>method
+request target
+HTTP version / protocol framing
+headers
+optional body</pre>
+      <p>Для HTTP/1.1 запрос выглядит текстово:</p>
+      <pre><code>GET /products?page=2 HTTP/1.1
+Host: example.com
+Accept: text/html
+Accept-Language: ru,en;q=0.9
+Accept-Encoding: gzip, br, zstd
+User-Agent: ...
+Cookie: session=abc</code></pre>
+      <p>Упрощённая структура:</p>
+      <pre>start line
+headers
+empty line
+optional body</pre>
+    </section>
+
+    <section>
+      <h2>3. Start line в HTTP/1.1</h2>
+      <p>
+        В HTTP/1.1 первая строка request называется <strong>request line</strong>.
+      </p>
+      <p>Пример:</p>
+      <pre><code>GET /products?page=2 HTTP/1.1</code></pre>
+      <p>Она состоит из:</p>
+      <pre>method         = GET
+request target = /products?page=2
+HTTP version   = HTTP/1.1</pre>
+
+      <h3>Method</h3>
+      <p>
+        <strong>HTTP method</strong> указывает действие, которое клиент хочет выполнить.
+      </p>
+      <p>Основные методы:</p>
+      <pre>GET     → получить представление ресурса
+HEAD    → получить headers как у GET, но без body ответа
+POST    → отправить данные на обработку
+PUT     → заменить ресурс
+PATCH   → частично изменить ресурс
+DELETE  → удалить ресурс
+OPTIONS → узнать доступные возможности/настройки</pre>
+      <p>
+        Для обычного перехода по ссылке или ввода URL в адресную строку чаще всего
+        используется:
+      </p>
+      <pre>GET</pre>
+      <p>Например:</p>
+      <pre><code>GET /about HTTP/1.1
+Host: example.com</code></pre>
+
+      <h3>Request target</h3>
+      <p>
+        <strong>Request target</strong> — цель запроса внутри HTTP-сообщения.
+      </p>
+      <p>
+        Для обычного запроса к origin server в HTTP/1.1 это чаще всего:
+      </p>
+      <pre>path + query</pre>
+      <p>Пример URL:</p>
+      <pre>https://example.com/products?page=2#reviews</pre>
+      <p>В request target попадёт:</p>
+      <pre>/products?page=2</pre>
+      <p>А fragment/hash:</p>
+      <pre>#reviews</pre>
+      <p>в HTTP Request не отправляется.</p>
+
+      <h3>HTTP version</h3>
+      <p>В HTTP/1.1 request line содержит версию:</p>
+      <pre><code>HTTP/1.1</code></pre>
+      <p>
+        В HTTP/2 и HTTP/3 сообщение не передаётся как текстовая строка
+        <code>GET /path HTTP/1.1</code>. Там используются бинарные фреймы и
+        pseudo-headers, но семантика остаётся похожей.
+      </p>
+    </section>
+
+    <section>
+      <h2>4. HTTP/2 и HTTP/3: pseudo-headers</h2>
+      <p>
+        В HTTP/2 и HTTP/3 вместо текстовой start line используются специальные
+        pseudo-headers.
+      </p>
+      <p>Пример логического представления:</p>
+      <pre><code>:method: GET
+:scheme: https
+:authority: example.com
+:path: /products?page=2
+accept: text/html
+accept-language: ru,en;q=0.9
+cookie: session=abc</code></pre>
+      <p>Главные pseudo-headers:</p>
+      <pre>:method    → HTTP method, например GET
+:scheme    → scheme, например https
+:authority → host/authority, например example.com
+:path      → path + query</pre>
+      <p>Смысл остаётся тем же:</p>
+      <pre>что сделать?
+по какой схеме?
+к какому authority?
+какой path + query запросить?</pre>
+    </section>
+
+    <section>
+      <h2>5. Headers</h2>
+      <p>
+        <strong>HTTP headers</strong> — это метаданные запроса или ответа. В request
+        они помогают серверу понять контекст запроса и выбрать правильный response.
+      </p>
+      <p>Формат HTTP/1.x:</p>
+      <pre><code>Header-Name: value</code></pre>
+      <p>Примеры request headers:</p>
+      <pre><code>Host: example.com
+Accept: text/html
+Accept-Language: ru,en;q=0.9
+Accept-Encoding: gzip, br, zstd
+User-Agent: ...
+Cookie: session=abc
+Referer: https://example.com/
+Cache-Control: max-age=0
+If-None-Match: "abc123"</code></pre>
+
+      <h3>Host</h3>
+      <p>
+        <code>Host</code> указывает имя хоста и, при необходимости, порт.
+      </p>
+      <p>Пример:</p>
+      <pre><code>Host: example.com</code></pre>
+      <p>или:</p>
+      <pre><code>Host: example.com:8443</code></pre>
+      <p>
+        <code>Host</code> важен, потому что один IP-адрес может обслуживать несколько
+        сайтов. Сервер использует <code>Host</code>, чтобы понять, к какому
+        виртуальному хосту относится запрос.
+      </p>
+      <p>
+        В HTTP/2 и HTTP/3 аналогичную роль обычно выполняет pseudo-header:
+      </p>
+      <pre><code>:authority: example.com</code></pre>
+
+      <h3>Accept</h3>
+      <p>
+        <code>Accept</code> сообщает серверу, какие media types клиент готов получить.
+      </p>
+      <p>Пример:</p>
+      <pre><code>Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8</code></pre>
+      <p>
+        Для навигации браузер обычно указывает, что предпочитает HTML-документ.
+      </p>
+
+      <h3>Accept-Language</h3>
+      <p>
+        <code>Accept-Language</code> сообщает предпочтительные языки пользователя.
+      </p>
+      <p>Пример:</p>
+      <pre><code>Accept-Language: ru,en;q=0.9</code></pre>
+      <p>
+        Сервер может использовать это для выбора локализованной версии ответа.
+      </p>
+
+      <h3>Accept-Encoding</h3>
+      <p>
+        <code>Accept-Encoding</code> сообщает, какие алгоритмы сжатия клиент поддерживает.
+      </p>
+      <p>Пример:</p>
+      <pre><code>Accept-Encoding: gzip, br, zstd</code></pre>
+      <p>Сервер может вернуть сжатый ответ, например:</p>
+      <pre><code>Content-Encoding: br</code></pre>
+
+      <h3>User-Agent</h3>
+      <p>
+        <code>User-Agent</code> содержит информацию о клиенте: браузере, платформе
+        и иногда движке.
+      </p>
+      <p>Пример:</p>
+      <pre><code>User-Agent: Mozilla/5.0 ...</code></pre>
+      <p>
+        Этот заголовок исторически используется для совместимости, аналитики и
+        feature detection, но полагаться на него как на точное описание возможностей
+        браузера часто ненадёжно.
+      </p>
+
+      <h3>Cookie</h3>
+      <p>
+        <code>Cookie</code> отправляет серверу подходящие cookies для данного запроса.
+      </p>
+      <p>Пример:</p>
+      <pre><code>Cookie: session=abc; theme=dark</code></pre>
+      <p>
+        Cookies прикрепляются браузером автоматически, если они подходят по правилам
+        domain, path, secure, SameSite и другим атрибутам.
+      </p>
+
+      <h3>Referer</h3>
+      <p>
+        <code>Referer</code> сообщает адрес страницы, с которой был сделан переход
+        или запрос.
+      </p>
+      <p>Пример:</p>
+      <pre><code>Referer: https://example.com/catalog</code></pre>
+      <p>
+        Название исторически написано как <code>Referer</code>, а не <code>Referrer</code>.
+      </p>
+
+      <h3>Cache-related request headers</h3>
+      <p>
+        Браузер может отправлять заголовки, связанные с кэшированием и проверкой
+        актуальности ресурса.
+      </p>
+      <p>Примеры:</p>
+      <pre><code>Cache-Control: max-age=0
+If-None-Match: "abc123"
+If-Modified-Since: Tue, 15 Nov 2026 12:45:26 GMT</code></pre>
+      <p>
+        Эти заголовки важны для revalidation: браузер спрашивает сервер, изменилась
+        ли сохранённая копия ресурса.
+      </p>
+    </section>
+
+    <section>
+      <h2>6. Body запроса</h2>
+      <p><strong>Body</strong> — тело запроса.</p>
+      <p>
+        У обычного <code>GET</code> при навигации body обычно отсутствует.
+      </p>
+      <p>Пример GET без body:</p>
+      <pre><code>GET /products?page=2 HTTP/1.1
+Host: example.com</code></pre>
+      <p>У <code>POST</code>, <code>PUT</code>, <code>PATCH</code> body часто есть.</p>
+      <p>Пример POST:</p>
+      <pre><code>POST /api/login HTTP/1.1
+Host: example.com
+Content-Type: application/json
+Content-Length: 44
+
+{"email":"user@example.com","password":"..."}</code></pre>
+      <p>Если request содержит body, важны representation headers:</p>
+      <pre><code>Content-Type: application/json
+Content-Length: 44</code></pre>
+    </section>
+
+    <section>
+      <h2>7. Content-Type в request</h2>
+      <p>
+        <code>Content-Type</code> в request описывает тип данных в body.
+      </p>
+      <p>Примеры:</p>
+      <pre><code>Content-Type: application/json
+Content-Type: application/x-www-form-urlencoded
+Content-Type: multipart/form-data
+Content-Type: text/plain</code></pre>
+      <p>
+        Для обычного GET-навигационного запроса body обычно нет, поэтому
+        <code>Content-Type</code> для тела запроса обычно не нужен.
+      </p>
+    </section>
+
+    <section>
+      <h2>8. Safe, idempotent и cacheable методы</h2>
+      <p>HTTP-методы имеют семантику.</p>
+
+      <h3>Safe</h3>
+      <p>
+        <strong>Safe method</strong> — метод, который должен только читать данные и
+        не должен менять состояние сервера.
+      </p>
+      <p>Примеры:</p>
+      <pre>GET
+HEAD
+OPTIONS</pre>
+      <p>
+        Важно: “safe” означает намерение семантики метода, а не гарантию, что сервер
+        физически ничего не сделает.
+      </p>
+
+      <h3>Idempotent</h3>
+      <p>
+        <strong>Idempotent method</strong> — метод, повторное выполнение которого
+        должно иметь тот же эффект, что и одно выполнение.
+      </p>
+      <p>Примеры:</p>
+      <pre>GET
+HEAD
+PUT
+DELETE
+OPTIONS</pre>
+      <p><code>POST</code> обычно не считается idempotent.</p>
+
+      <h3>Cacheable</h3>
+      <p>
+        Некоторые ответы на запросы могут кэшироваться, если это разрешено
+        правилами HTTP caching.
+      </p>
+      <p>Чаще всего кэшируют responses на <code>GET</code>.</p>
+    </section>
+
+    <section>
+      <h2>9. Request при navigation, subresource и fetch()</h2>
+      <p>HTTP Request может возникнуть в разных сценариях.</p>
+
+      <h3>Navigation request</h3>
+      <p>Пользователь вводит URL или кликает ссылку:</p>
+      <pre>адресная строка / link click
+→ navigation request</pre>
+      <p>Обычно:</p>
+      <pre>GET HTML document</pre>
+
+      <h3>Subresource request</h3>
+      <p>HTML-документ содержит ресурсы:</p>
+      <pre><code>&lt;link rel="stylesheet" href="/styles.css"&gt;
+&lt;script src="/app.js"&gt;&lt;/script&gt;
+&lt;img src="/logo.png"&gt;</code></pre>
+      <p>Браузер делает отдельные HTTP requests:</p>
+      <pre>GET /styles.css
+GET /app.js
+GET /logo.png</pre>
+
+      <h3>fetch/XHR request</h3>
+      <p>JavaScript может инициировать request:</p>
+      <pre><code>fetch("/api/users")</code></pre>
+      <p>Тогда request может быть:</p>
+      <pre>GET /api/users
+POST /api/login
+PATCH /api/profile</pre>
+    </section>
+
+    <section>
+      <h2>10. Credentials, cookies и CORS</h2>
+      <p>Некоторые запросы включают credentials:</p>
+      <pre>cookies
+HTTP authentication
+TLS client certificates</pre>
+      <p>
+        При same-origin запросах cookies обычно могут отправляться автоматически,
+        если подходят по правилам cookies.
+      </p>
+      <p>
+        Для cross-origin запросов включаются правила CORS. CORS — это механизм на
+        основе HTTP headers, который позволяет серверу указать, каким origin
+        разрешён доступ к ресурсу.
+      </p>
+      <p>
+        В некоторых cross-origin сценариях браузер перед основным запросом отправляет
+        preflight request методом <code>OPTIONS</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>11. Что HTTP Request не делает</h2>
+      <p>Важно не путать этапы.</p>
+      <p>HTTP Request не выполняет DNS. DNS уже был нужен раньше, чтобы получить IP.</p>
+      <p>
+        HTTP Request не открывает соединение. Соединение уже открыто или выбрано раньше.
+      </p>
+      <p>HTTP Request не рендерит страницу. Он только отправляет сообщение серверу.</p>
+      <p>HTTP Request не содержит fragment/hash из URL.</p>
+    </section>
+
+    <section>
+      <h2>12. Как блок связан с общей схемой</h2>
+      <p>В общей схеме:</p>
+      <pre>Открыть / переиспользовать соединение
+→ HTTP Request
+→ HTTP Response</pre>
+      <p>HTTP Request использует результаты предыдущих этапов:</p>
+      <pre>scheme      → :scheme в HTTP/2/3, выбор HTTPS ранее
+host/port   → Host или :authority
+path/query  → request target или :path
+cookies     → Cookie header, если применимо
+cache state → conditional headers, если нужна revalidation</pre>
+    </section>
+
+    <section>
+      <h2>13. Мини-глоссарий</h2>
+
+      <h3>HTTP</h3>
+      <p>Hypertext Transfer Protocol — протокол прикладного уровня для передачи ресурсов и сообщений между клиентом и сервером.</p>
+
+      <h3>HTTP Request</h3>
+      <p>Сообщение клиента серверу.</p>
+
+      <h3>Method</h3>
+      <p>Действие, которое клиент хочет выполнить: GET, POST, PUT, DELETE и т.д.</p>
+
+      <h3>GET</h3>
+      <p>Метод для получения представления ресурса.</p>
+
+      <h3>POST</h3>
+      <p>Метод для отправки данных на обработку.</p>
+
+      <h3>Request target</h3>
+      <p>Цель запроса. Для обычного HTTP/1.1 запроса чаще всего <code>path + query</code>.</p>
+
+      <h3>Header</h3>
+      <p>Метаданные HTTP-сообщения.</p>
+
+      <h3>Body</h3>
+      <p>Тело запроса или ответа.</p>
+
+      <h3>Host</h3>
+      <p>HTTP/1.1 header, указывающий host и, при необходимости, port.</p>
+
+      <h3>:authority</h3>
+      <p>HTTP/2/HTTP/3 pseudo-header, близкий по роли к <code>Host</code>.</p>
+
+      <h3>:path</h3>
+      <p>HTTP/2/HTTP/3 pseudo-header, содержащий path + query.</p>
+
+      <h3>Cookie</h3>
+      <p>Request header, через который браузер отправляет cookies серверу.</p>
+
+      <h3>CORS</h3>
+      <p>Cross-Origin Resource Sharing — механизм HTTP headers для разрешения cross-origin доступа.</p>
+
+      <h3>Preflight</h3>
+      <p>Предварительный CORS-запрос методом OPTIONS.</p>
+    </section>
+
+    <section>
+      <h2>Источники</h2>
+      <ul>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview">MDN — Overview of HTTP</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Messages">MDN — HTTP messages</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers">MDN — HTTP headers</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods">MDN — HTTP request methods</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Type">MDN — Content-Type</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS">MDN — CORS</a></li>
+        <li><a href="https://www.rfc-editor.org/rfc/rfc9110.html">RFC 9110 — HTTP Semantics</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
