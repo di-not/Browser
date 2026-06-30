@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DOMContentLoaded → subresources → load</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>DOMContentLoaded → subresources → load</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко о блоке</h2>
+      <p>
+        Этот блок описывает участок жизненного цикла HTML-документа между событием
+        <code>DOMContentLoaded</code> и событием <code>load</code>.
+      </p>
+      <pre>DOMContentLoaded
+→ Images / subresources загружены?
+   ├─ нет → ждать ресурсы, которые задерживают load
+   └─ да  → load</pre>
+      <blockquote>
+        <p>
+          <code>DOMContentLoaded</code> означает, что HTML-документ уже разобран и DOM
+          готов для работы. <code>load</code> означает более позднюю точку: страница и
+          зависимые ресурсы, которые участвуют в загрузке страницы, завершили загрузку.
+        </p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Границы блока</h2>
+      <p>Блок начинается событием <code>DOMContentLoaded</code>.</p>
+      <p>
+        <code>DOMContentLoaded</code> — событие <code>Document</code>. Оно срабатывает
+        после того, как HTML-документ полностью разобран, а deferred scripts и
+        module scripts загружены и выполнены.
+      </p>
+      <pre><code>document.addEventListener("DOMContentLoaded", () => {
+  console.log("DOM готов");
+});</code></pre>
+      <p>Блок заканчивается событием <code>load</code>.</p>
+      <p>
+        <code>load</code> для страницы обычно слушают на <code>window</code>. Это событие
+        срабатывает, когда загружена вся страница вместе с зависимыми ресурсами:
+        stylesheets, scripts, iframes, images, кроме ресурсов, которые загружаются лениво.
+      </p>
+      <pre><code>window.addEventListener("load", () => {
+  console.log("Страница и зависимые ресурсы загружены");
+});</code></pre>
+    </section>
+
+    <section>
+      <h2>2. Что означает DOMContentLoaded</h2>
+      <p>
+        <code>DOMContentLoaded</code> связан с готовностью DOM, а не с полной загрузкой
+        всех ресурсов страницы.
+      </p>
+      <p>К моменту <code>DOMContentLoaded</code>:</p>
+      <pre>HTML parsing завершён
+defer scripts выполнены
+module scripts выполнены
+DOM уже можно безопасно читать и изменять</pre>
+      <p>Но <code>DOMContentLoaded</code> не ждёт:</p>
+      <pre>images
+subframes / iframes
+async scripts</pre>
+      <p>
+        Также <code>DOMContentLoaded</code> не является событием завершения загрузки CSS.
+        Но связь со stylesheets возможна косвенно: deferred и module scripts ждут
+        stylesheets, а <code>DOMContentLoaded</code> ставится после выполнения таких scripts.
+      </p>
+      <p>Поэтому корректная формула:</p>
+      <pre>DOMContentLoaded ≠ все ресурсы загружены
+DOMContentLoaded ≠ CSS loaded
+DOMContentLoaded ≠ load</pre>
+    </section>
+
+    <section>
+      <h2>3. Что такое subresources</h2>
+      <p>
+        <strong>Subresources</strong> — ресурсы, которые документ использует
+        дополнительно к основному HTML.
+      </p>
+      <p>Примеры:</p>
+      <pre><code>&lt;link rel="stylesheet" href="/styles.css"&gt;
+&lt;script src="/app.js" async&gt;&lt;/script&gt;
+&lt;img src="/hero.png" alt=""&gt;
+&lt;iframe src="/widget.html"&gt;&lt;/iframe&gt;</code></pre>
+      <p>К подресурсам относятся, например:</p>
+      <pre>stylesheets
+scripts
+images
+iframes
+fonts
+media resources</pre>
+      <p>
+        В контексте события <code>load</code> важны не “абсолютно все возможные ресурсы”,
+        а ресурсы, которые браузер считает зависимыми ресурсами страницы и которые
+        задерживают завершение загрузки документа. Лениво загружаемые ресурсы, например
+        изображения с <code>loading="lazy"</code>, не должны задерживать <code>window.load</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>4. Images / subresources загружены?</h2>
+      <p>Узел диаграммы:</p>
+      <pre>Images / subresources загружены?</pre>
+      <p>лучше понимать как проверку:</p>
+      <pre>Завершили ли загрузку ресурсы, которые задерживают load?</pre>
+      <p>
+        Это не означает, что браузер начинает загружать картинки только после
+        <code>DOMContentLoaded</code>. Ресурсы обычно обнаруживаются и загружаются раньше,
+        параллельно с parsing HTML и другими этапами.
+      </p>
+      <p>Упрощённая временная схема:</p>
+      <pre>HTML parsing идёт
+→ браузер обнаруживает images / CSS / scripts / iframes
+→ ресурсы начинают загружаться
+→ DOMContentLoaded
+→ часть ресурсов может ещё загружаться
+→ все load-delaying resources завершены
+→ load</pre>
+      <p>
+        Изображение может загрузиться до <code>DOMContentLoaded</code>, между
+        <code>DOMContentLoaded</code> и <code>load</code>, или позже, если оно
+        лениво загружается и не участвует в начальной загрузке страницы.
+      </p>
+    </section>
+
+    <section>
+      <h2>5. Что означает load</h2>
+      <p><code>load</code> — более позднее событие, чем <code>DOMContentLoaded</code>.</p>
+      <p>
+        Для страницы <code>window.load</code> означает, что завершилась загрузка страницы
+        и зависимых ресурсов, включая stylesheets, scripts, iframes и images, кроме
+        ресурсов с ленивой загрузкой.
+      </p>
+      <pre><code>window.addEventListener("load", () => {
+  // можно выполнять код, которому нужны загруженные изображения,
+  // iframe или другие зависимые ресурсы
+});</code></pre>
+      <p>
+        <code>load</code> используют, когда код действительно зависит от уже загруженных
+        ресурсов. Например, если нужно работать с изображением после его загрузки.
+      </p>
+      <p>
+        Но для обычной инициализации интерфейса часто достаточно
+        <code>DOMContentLoaded</code>, потому что ждать все изображения и iframes
+        может быть лишним.
+      </p>
+    </section>
+
+    <section>
+      <h2>6. readyState: loading, interactive, complete</h2>
+      <p>
+        Состояние документа можно проверить через <code>document.readyState</code>.
+      </p>
+      <pre><code>console.log(document.readyState);</code></pre>
+      <p>Основные значения:</p>
+      <pre>loading
+→ HTML ещё загружается и parser работает
+
+interactive
+→ HTML разобран, но подресурсы ещё могут загружаться
+
+complete
+→ документ и подресурсы загружены, load скоро будет или уже был</pre>
+      <p>Это удобно как ориентир:</p>
+      <pre>loading     → до готовности DOM
+interactive → около DOMContentLoaded
+complete    → около load</pre>
+      <p>
+        Но <code>readyState</code> не заменяет понимание событий:
+        <code>DOMContentLoaded</code> и <code>load</code> остаются отдельными событиями,
+        которые нужны для разных задач.
+      </p>
+    </section>
+
+    <section>
+      <h2>7. Что важно не перепутать</h2>
+      <pre>DOMContentLoaded ≠ load</pre>
+      <p><code>DOMContentLoaded</code> наступает раньше. <code>load</code> ждёт больше ресурсов.</p>
+      <pre>DOMContentLoaded ≠ images loaded</pre>
+      <p>Картинки могут ещё загружаться.</p>
+      <pre>DOMContentLoaded ≠ CSS loaded</pre>
+      <p>
+        Событие не ждёт stylesheets напрямую, но CSS может влиять через deferred/module scripts.
+      </p>
+      <pre>load ≠ все ресурсы, которые когда-либо загрузит страница</pre>
+      <p>
+        Ленивая загрузка, последующие <code>fetch</code>, динамически добавленные ресурсы
+        и действия пользователя могут происходить после <code>load</code>.
+      </p>
+      <pre>img load ≠ window load</pre>
+      <p>
+        У отдельного <code>&lt;img&gt;</code> может быть своё событие <code>load</code>.
+        <code>window.load</code> относится к загрузке страницы в целом.
+      </p>
+      <pre>parser complete ≠ DOMContentLoaded</pre>
+      <p>
+        После завершения parsing ещё должны выполниться deferred и module scripts.
+      </p>
+    </section>
+
+    <section>
+      <h2>Источники</h2>
+      <ul>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/DOMContentLoaded_event">MDN Web Docs — Document: DOMContentLoaded event</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/load_event">MDN Web Docs — Window: load event</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/readyState">MDN Web Docs — Document: readyState property</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/load_event">MDN Web Docs — HTMLElement: load event</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/HTMLImageElement/loading">MDN Web Docs — HTMLImageElement: loading property</a></li>
+        <li><a href="https://html.spec.whatwg.org/multipage/dom.html#current-document-readiness">HTML Standard — Document lifecycle / current document readiness</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
