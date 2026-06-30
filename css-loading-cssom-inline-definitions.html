@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSS loading и CSSOM</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>CSS loading и CSSOM</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко о блоке</h2>
+      <p>
+        Браузер учитывает стили из нескольких источников: внешней таблицы стилей,
+        элемента <code>&lt;style&gt;</code>, атрибута <code>style=""</code> и базовых
+        стилей браузера. Внешний CSS нужно загрузить отдельным ресурсом; встроенный CSS
+        уже находится в HTML, но его всё равно нужно разобрать. После разбора таблицы
+        стилей представлены в CSSOM, а inline declarations участвуют в каскаде как
+        стили конкретного элемента.
+      </p>
+      <pre>Есть CSS?
+├─ external stylesheet → Загрузка CSS
+├─ inline &lt;style&gt;      → CSS parsing
+├─ style="..."         → Inline declarations
+└─ нет стилей сайта    → Базовые стили браузера
+
+Загрузка CSS
+→ CSS parsing
+→ CSSOM</pre>
+      <blockquote>
+        <p>
+          CSS loading и CSS parsing подготавливают данные для вычисления стилей.
+          Внешние и встроенные таблицы стилей становятся частью CSSOM; <code>style=""</code>
+          даёт inline declarations; базовые стили браузера применяются даже без CSS,
+          написанного разработчиком.
+        </p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Границы блока</h2>
+      <p>
+        Блок начинается, когда браузер при обработке HTML встречает источник стилей.
+      </p>
+      <p>Внешняя таблица стилей:</p>
+      <pre><code>&lt;link rel="stylesheet" href="/styles.css"&gt;</code></pre>
+      <p>Встроенная таблица стилей:</p>
+      <pre><code>&lt;style&gt;
+  h1 {
+    color: red;
+  }
+&lt;/style&gt;</code></pre>
+      <p>Inline style на элементе:</p>
+      <pre><code>&lt;h1 style="color: red"&gt;Title&lt;/h1&gt;</code></pre>
+      <p>Блок заканчивается после подготовки CSS-данных:</p>
+      <pre>CSSOM
++ inline declarations
++ базовые стили браузера</pre>
+      <p>
+        Следующий этап — сопоставить CSS с DOM, применить каскад, получить computed
+        styles и перейти к построению видимого результата. CSSOM не содержит размеры,
+        координаты и пиксели; эти данные появляются позже, на стадиях layout и paint.
+      </p>
+    </section>
+
+    <section>
+      <h2>2. Внешняя таблица стилей</h2>
+      <p>
+        <strong>External stylesheet</strong> — внешняя таблица стилей, подключённая
+        к документу через <code>&lt;link rel="stylesheet"&gt;</code>.
+      </p>
+      <pre><code>&lt;link rel="stylesheet" href="/styles.css"&gt;</code></pre>
+      <p>
+        Элемент <code>&lt;link&gt;</code> связывает документ с внешним ресурсом. При
+        <code>rel="stylesheet"</code> этот ресурс является CSS-таблицей стилей документа.
+      </p>
+      <p>Путь внешнего CSS:</p>
+      <pre>HTML parser встречает &lt;link rel="stylesheet"&gt;
+→ браузер берёт URL из href
+→ CSS-файл загружается
+→ CSS-текст передаётся CSS parser
+→ результат участвует в CSSOM</pre>
+      <p>
+        <strong>CSS parser</strong> — часть браузера, которая разбирает CSS-текст и
+        превращает его во внутренние CSS-структуры.
+      </p>
+      <p>
+        <code>&lt;link rel="stylesheet"&gt;</code> в <code>&lt;head&gt;</code> по умолчанию
+        блокирует первое корректное отображение страницы: браузеру нужны применимые стили,
+        чтобы построить правильный первый визуальный результат.
+      </p>
+      <p>
+        При этом HTML parser обычно может продолжать работу: DOM строится дальше, пока CSS
+        загружается. Ограничение касается не самого чтения HTML, а возможности показать
+        страницу без нужных стилей.
+      </p>
+      <p>Пример с условием применения:</p>
+      <pre><code>&lt;link rel="stylesheet" href="/main.css"&gt;
+&lt;link rel="stylesheet" href="/print.css" media="print"&gt;</code></pre>
+      <p>
+        <code>main.css</code> применяется к обычному отображению страницы.
+        <code>print.css</code> предназначен для печати: при просмотре на экране условие
+        <code>media="print"</code> не подходит, поэтому такая таблица стилей не должна
+        задерживать первое отображение страницы на экране.
+      </p>
+    </section>
+
+    <section>
+      <h2>3. Inline &lt;style&gt;</h2>
+      <p>
+        <strong>Inline &lt;style&gt;</strong> — встроенная таблица стилей внутри HTML-документа.
+      </p>
+      <pre><code>&lt;style&gt;
+  body {
+    margin: 0;
+  }
+
+  .title {
+    color: red;
+  }
+&lt;/style&gt;</code></pre>
+      <p>
+        CSS внутри <code>&lt;style&gt;</code> уже находится в HTML. Для него не нужен
+        отдельный сетевой запрос, но браузер всё равно должен разобрать CSS-текст.
+      </p>
+      <pre>&lt;style&gt;
+→ CSS-текст
+→ CSS parsing
+→ CSSOM</pre>
+      <p>
+        Такие правила применяются к содержимому документа и участвуют в обычном
+        CSS-процессе: разбираются, попадают в объектное представление и дальше
+        участвуют в каскаде.
+      </p>
+    </section>
+
+    <section>
+      <h2>4. style=""</h2>
+      <p>
+        <code>style=""</code> — HTML-атрибут, который содержит CSS-декларации прямо
+        на элементе.
+      </p>
+      <pre><code>&lt;h1 style="color: red; margin: 0"&gt;Title&lt;/h1&gt;</code></pre>
+      <p>
+        <strong>Declaration</strong> — CSS-декларация, пара <code>property: value</code>,
+        например:
+      </p>
+      <pre><code>color: red;</code></pre>
+      <p>В примере выше у элемента <code>h1</code> есть две inline declarations:</p>
+      <pre>color: red
+margin: 0</pre>
+      <p>
+        Эта ветка не создаёт отдельную таблицу стилей документа. Поэтому
+        <code>style=""</code> не ведёт напрямую в CSSOM как <code>CSSStyleSheet</code>.
+      </p>
+      <p>Путь inline style:</p>
+      <pre>style=""
+→ разбор списка declarations
+→ inline declarations элемента
+→ участие в cascade</pre>
+      <p>
+        Через <code>HTMLElement.style</code> можно читать и изменять стили, записанные
+        в атрибуте <code>style</code>:
+      </p>
+      <pre><code>const title = document.querySelector("h1");
+
+title.style.color = "red";
+title.style.margin = "0";</code></pre>
+    </section>
+
+    <section>
+      <h2>5. CSS parsing</h2>
+      <p>
+        CSS parsing — это переход от потока Unicode-символов к CSS tokens, а затем
+        к CSS objects: stylesheets, rules и declarations.
+      </p>
+      <pre>stream of Unicode code points
+→ CSS tokens
+→ CSS objects: stylesheets, rules, declarations</pre>
+      <p>
+        <strong>Rule</strong> — CSS-правило. В обычном случае оно состоит из selector
+        и блока declarations.
+      </p>
+      <pre><code>.card {
+  display: grid;
+  gap: 16px;
+}</code></pre>
+      <p>
+        <strong>Selector</strong> — часть правила, которая выбирает элементы документа.
+        В примере это <code>.card</code>.
+      </p>
+      <p>
+        <strong>Declaration</strong> — пара <code>property: value</code>. В примере это
+        <code>display: grid</code> и <code>gap: 16px</code>.
+      </p>
+      <p>Упрощённый результат разбора:</p>
+      <pre>stylesheet
+└─ rule
+   ├─ selector: .card
+   ├─ declaration: display: grid
+   └─ declaration: gap: 16px</pre>
+      <p>Для разных источников CSS разбор начинается в разных местах:</p>
+      <pre>&lt;link rel="stylesheet"&gt; → загрузка CSS-файла → parsing stylesheet
+&lt;style&gt;                 → parsing stylesheet из HTML
+style=""                → parsing declaration list элемента</pre>
+      <p>HTML parsing и CSS parsing — разные процессы:</p>
+      <pre>HTML parsing → DOM
+CSS parsing  → CSS rules / declarations / CSSOM</pre>
+    </section>
+
+    <section>
+      <h2>6. CSSOM</h2>
+      <p>
+        <strong>CSSOM</strong> (<strong>CSS Object Model</strong>) — объектная модель CSS.
+        Это не “готовые стили элементов” и не визуальное дерево страницы, а представление
+        таблиц стилей и CSS-правил в виде объектов, с которыми может работать браузер
+        и JavaScript API.
+      </p>
+      <p>Для внешнего stylesheet и для <code>&lt;style&gt;</code> путь выглядит так:</p>
+      <pre>CSS text
+→ CSS parsing
+→ CSSStyleSheet
+→ CSSRuleList
+→ CSSRule</pre>
+      <p>
+        <strong>CSSStyleSheet</strong> — объект, представляющий одну таблицу стилей.
+        Такая таблица может прийти из внешнего файла или из элемента <code>&lt;style&gt;</code>.
+      </p>
+      <p>После parsing-а браузер может представить эти стили примерно так:</p>
+      <pre>Document
+└─ styleSheets
+   ├─ CSSStyleSheet from &lt;link rel="stylesheet"&gt;
+   │  └─ cssRules
+   │     ├─ CSSRule
+   │     └─ CSSRule
+   │
+   └─ CSSStyleSheet from &lt;style&gt;
+      └─ cssRules
+         ├─ CSSStyleRule: h1 { color: red; }
+         └─ CSSStyleRule: .card { display: grid; }</pre>
+      <p>На уровне JavaScript список таблиц стилей доступен через:</p>
+      <pre><code>document.styleSheets</code></pre>
+      <p>
+        Это не массив DOM-элементов <code>&lt;link&gt;</code> и <code>&lt;style&gt;</code>,
+        а список stylesheet-объектов. Каждый <code>CSSStyleSheet</code> содержит
+        список правил <code>cssRules</code>.
+      </p>
+      <pre><code>const sheet = document.styleSheets[0];
+
+sheet.cssRules;</code></pre>
+      <p>
+        <code>cssRules</code> — список CSS-правил внутри конкретной таблицы стилей.
+      </p>
+      <p>Обычное CSS-правило:</p>
+      <pre><code>.card {
+  display: grid;
+  gap: 16px;
+}</code></pre>
+      <p>Упрощённо в CSSOM:</p>
+      <pre>CSSStyleRule
+├─ selectorText: ".card"
+└─ style
+   ├─ display: "grid"
+   └─ gap: "16px"</pre>
+      <p>At-rule:</p>
+      <pre><code>@media (min-width: 800px) {
+  .card {
+    display: grid;
+  }
+}</code></pre>
+      <p>Упрощённо:</p>
+      <pre>CSSMediaRule
+├─ condition: "(min-width: 800px)"
+└─ cssRules
+   └─ CSSStyleRule: .card { display: grid; }</pre>
+      <p>То есть CSSOM можно представить как структуру stylesheet-ов и правил:</p>
+      <pre>document.styleSheets
+→ CSSStyleSheet
+→ CSSRuleList
+→ CSSRule
+→ declarations</pre>
+      <p>Важно: <code>style=""</code> устроен иначе.</p>
+      <pre><code>&lt;h1 style="color: red; margin: 0"&gt;Title&lt;/h1&gt;</code></pre>
+      <p>
+        Атрибут <code>style</code> не создаёт отдельный <code>CSSStyleSheet</code> в
+        <code>document.styleSheets</code>. Он относится к конкретному элементу и
+        доступен через <code>HTMLElement.style</code>.
+      </p>
+      <pre><code>const title = document.querySelector("h1");
+
+title.style.color;
+title.style.margin;</code></pre>
+      <p>Поэтому в диаграмме ветка <code>style=""</code> ведёт в inline declarations, а не в CSSOM:</p>
+      <pre>style=""
+→ inline declarations конкретного элемента
+→ cascade
+→ computed styles</pre>
+      <p>CSSOM также не равен DOM.</p>
+      <pre>DOM
+→ структура документа:
+   html, body, h1, p, button
+
+CSSOM
+→ структура CSS:
+   stylesheets, rules, selectors, declarations</pre>
+      <p>
+        И CSSOM не равен render tree. В CSSOM ещё нет финального ответа на вопрос,
+        как именно будет выглядеть каждый элемент на экране.
+      </p>
+      <pre>DOM
++ CSSOM
++ inline declarations
++ базовые стили браузера
+→ cascade
+→ computed styles
+→ render tree</pre>
+      <p>
+        Поэтому CSSOM — это промежуточная модель CSS. Она нужна браузеру, чтобы
+        хранить и обрабатывать таблицы стилей, но финальный внешний вид элемента
+        появляется только после cascade и вычисления computed styles.
+      </p>
+    </section>
+
+    <section>
+      <h2>7. Базовые стили браузера</h2>
+      <p>
+        Даже если в документе нет внешнего CSS, <code>&lt;style&gt;</code> и
+        <code>style=""</code>, браузер применяет базовые стили.
+      </p>
+      <pre><code>&lt;h1&gt;Title&lt;/h1&gt;
+&lt;p&gt;Text&lt;/p&gt;
+&lt;a href="/about"&gt;About&lt;/a&gt;</code></pre>
+      <p>
+        Обычно <code>h1</code> отображается как заголовок, <code>p</code> как абзац,
+        а <code>a</code> как ссылка. Это результат user-agent styles — стандартных
+        стилей браузера.
+      </p>
+      <p>В CSS cascade есть несколько источников стилей, или style origins:</p>
+      <pre>user-agent origin
+→ базовые стили браузера
+
+author origin
+→ стили сайта: &lt;link&gt;, &lt;style&gt;, style=""
+
+user origin
+→ стили пользователя, если они есть</pre>
+      <p>
+        Ветка “нет стилей сайта” означает отсутствие author styles. Базовые стили
+        браузера при этом остаются.
+      </p>
+    </section>
+
+    <section>
+      <h2>8. Cascade и computed styles</h2>
+      <p>
+        После подготовки CSS-данных браузер должен получить итоговые стили для
+        конкретных DOM-элементов.
+      </p>
+      <pre>DOM
++ CSSOM
++ inline declarations
++ базовые стили браузера
+→ cascade
+→ computed styles</pre>
+      <p>
+        <strong>Cascade</strong> — алгоритм выбора итогового значения CSS-свойства,
+        когда к одному элементу подходят несколько деклараций.
+      </p>
+      <pre><code>h1 {
+  color: black;
+}
+
+.title {
+  color: red;
+}</code></pre>
+      <pre><code>&lt;h1 class="title"&gt;Hello&lt;/h1&gt;</code></pre>
+      <p>
+        К элементу подходят обе декларации. Итоговое значение <code>color</code>
+        выбирается правилами cascade: учитываются origin, importance, cascade layers,
+        specificity, scoping proximity и порядок объявления.
+      </p>
+      <p>
+        <strong>Computed styles</strong> — вычисленные значения CSS-свойств после
+        cascade и inheritance. Эти значения используются дальше при построении
+        render tree и последующих стадиях отображения.
+      </p>
+    </section>
+
+    <section>
+      <h2>9. Связь с DOMContentLoaded</h2>
+      <p>
+        <code>DOMContentLoaded</code> относится к жизненному циклу HTML-документа,
+        а не к отдельной загрузке CSS.
+      </p>
+      <p>
+        Событие срабатывает после полного parsing HTML и после загрузки/выполнения
+        deferred и module scripts. Оно не ждёт изображения, subframes и async scripts.
+      </p>
+      <p>Со stylesheets связь косвенная:</p>
+      <pre>defer/module scripts могут ждать stylesheets
+→ DOMContentLoaded ждёт defer/module scripts
+→ CSS может косвенно задержать DOMContentLoaded</pre>
+      <p>Короткая формула:</p>
+      <pre>DOMContentLoaded ≠ CSS loaded</pre>
+    </section>
+
+    <section>
+      <h2>10. Связь с render</h2>
+      <p>
+        Critical rendering path описывает путь, по которому браузер превращает HTML,
+        CSS и JavaScript в пиксели на экране. Для CSS-блока важна граница:
+      </p>
+      <pre>CSSOM / inline declarations / базовые стили
+→ cascade
+→ computed styles
+→ render tree</pre>
+      <p>
+        <strong>Render tree</strong> — дерево видимых узлов с вычисленными стилями.
+        Оно строится позже, на основе DOM и CSS-данных. CSSOM сам по себе не содержит
+        геометрию элементов.
+      </p>
+      <pre>CSSOM ≠ DOM
+CSSOM ≠ render tree
+CSSOM ≠ layout
+CSSOM ≠ paint</pre>
+    </section>
+
+    <section>
+      <h2>11. Что важно не перепутать</h2>
+      <pre>Есть CSS ≠ только внешний CSS-файл</pre>
+      <p>CSS может быть внешним, встроенным в <code>&lt;style&gt;</code> или записанным в <code>style=""</code>.</p>
+      <pre>Загрузка CSS относится к external stylesheet</pre>
+      <p><code>&lt;style&gt;</code> и <code>style=""</code> уже находятся внутри HTML.</p>
+      <pre>style="" ≠ CSSStyleSheet</pre>
+      <p>Inline style относится к конкретному элементу и доступен через <code>HTMLElement.style</code>.</p>
+      <pre>нет стилей сайта ≠ нет стилей вообще</pre>
+      <p>Базовые стили браузера всё равно применяются.</p>
+      <pre>CSSOM ≠ DOM</pre>
+      <p>DOM описывает структуру документа, CSSOM — таблицы стилей и CSS-правила.</p>
+      <pre>CSSOM ≠ render tree</pre>
+      <p>Render tree строится позже на основе DOM и computed styles.</p>
+      <pre>DOMContentLoaded ≠ CSS loaded</pre>
+      <p>CSS может влиять на <code>DOMContentLoaded</code> только косвенно через deferred/module scripts.</p>
+    </section>
+
+    <section>
+      <h2>Источники</h2>
+      <ul>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/Performance/Guides/Critical_rendering_path">MDN Web Docs — Critical rendering path</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/Performance/Guides/How_browsers_work">MDN Web Docs — Populating the page: how browsers work</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/link">MDN Web Docs — &lt;link&gt;: The External Resource Link element</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/style">MDN Web Docs — &lt;style&gt;: The Style Information element</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/style">MDN Web Docs — style global attribute</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/style">MDN Web Docs — HTMLElement: style property</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/CSS_Object_Model">MDN Web Docs — CSS Object Model</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/styleSheets">MDN Web Docs — Document: styleSheets property</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/CSSStyleSheet">MDN Web Docs — CSSStyleSheet</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Cascade/Introduction">MDN Web Docs — Introduction to the CSS cascade</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Glossary/Style_origin">MDN Web Docs — Style origin</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/DOMContentLoaded_event">MDN Web Docs — Document: DOMContentLoaded event</a></li>
+        <li><a href="https://www.w3.org/TR/css-syntax-3/">W3C — CSS Syntax Module Level 3</a></li>
+        <li><a href="https://www.w3.org/TR/cssom-1/">W3C — CSS Object Model (CSSOM)</a></li>
+        <li><a href="https://www.w3.org/TR/css-cascade-4/">W3C — CSS Cascading and Inheritance Level 4</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
