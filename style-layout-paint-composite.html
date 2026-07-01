@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Style → Layout → Paint → Composite</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>Style → Layout → Paint → Composite</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко о блоке</h2>
+      <p>
+        <code>Style → Layout → Paint → Composite</code> — это упрощённая схема
+        browser rendering pipeline: процесса, в котором браузер подготавливает
+        визуальный кадр страницы.
+      </p>
+      <p>В упрощённом виде:</p>
+      <pre>JavaScript / CSS
+→ Style
+→ Layout
+→ Paint
+→ Composite</pre>
+      <p>
+        Начальный пункт <code>JavaScript / CSS</code> означает причину изменения:
+        скрипт мог изменить DOM, CSS мог изменить состояние элемента, анимация могла
+        обновить значение свойства, или браузер мог выполнять первый показ страницы
+        после загрузки HTML и CSS.
+      </p>
+      <blockquote>
+        <p>
+          Браузер не обязан каждый раз проходить все стадии. Если изменилась геометрия
+          элемента, обычно нужны <code>Layout</code>, <code>Paint</code> и
+          <code>Composite</code>. Если изменился только цвет, <code>Layout</code>
+          можно пропустить. Если меняется <code>transform</code> или
+          <code>opacity</code> в подходящих условиях, браузер может обойтись стадией
+          <code>Composite</code>.
+        </p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Границы блока</h2>
+      <p>
+        Блок начинается, когда браузеру нужно подготовить новый визуальный результат.
+      </p>
+      <p>Причины могут быть такими:</p>
+      <pre>DOM построен впервые
+CSS загружен или изменён
+DOM изменился
+изменился class или style
+сработала CSS-анимация
+изменился размер окна
+пользователь выполнил действие</pre>
+      <p>
+        Блок заканчивается, когда браузер подготовил кадр для вывода на экран.
+      </p>
+      <pre>Style
+→ Layout
+→ Paint
+→ Composite
+→ кадр готов к отображению</pre>
+      <p>
+        Эта схема относится к браузеру. Код приложения может быть причиной изменения,
+        но вычисление стилей, layout, paint и compositing выполняет браузер.
+      </p>
+    </section>
+
+    <section>
+      <h2>2. Style</h2>
+      <p>
+        <strong>Style</strong> — стадия вычисления стилей для элементов. Браузер берёт
+        DOM и CSS-данные, находит подходящие правила для элементов и получает итоговые
+        значения CSS-свойств.
+      </p>
+      <p>Пример:</p>
+      <pre><code>&lt;h1 class="title"&gt;Hello&lt;/h1&gt;</code></pre>
+      <pre><code>h1 {
+  color: black;
+}
+
+.title {
+  color: red;
+}</code></pre>
+      <p>
+        CSS-правило — это блок вида <code>.title { color: red; }</code>.
+      </p>
+      <p>
+        <strong>Selector</strong> описывает, к каким элементам применяется правило.
+        В примере <code>.title</code> выбирает элементы с классом <code>title</code>.
+      </p>
+      <p>
+        <strong>Declaration</strong> — пара <code>свойство: значение</code>. В примере
+        это <code>color: red</code>.
+      </p>
+      <p>На стадии <code>Style</code> браузер делает примерно следующее:</p>
+      <pre>DOM-элемент
++ CSS-правила
++ inline styles
++ базовые стили браузера
+→ выбрать подходящие декларации
+→ применить cascade
+→ получить computed styles</pre>
+      <p>
+        <strong>Cascade</strong> — алгоритм выбора итогового значения, когда к одному
+        элементу подходят несколько CSS-деклараций.
+      </p>
+      <p>
+        <strong>Computed styles</strong> — вычисленные стили элемента. Это уже не
+        исходный CSS-текст, а итоговые значения свойств после применения правил,
+        наследования и каскада.
+      </p>
+      <p>Например, для элемента может получиться:</p>
+      <pre>display: block
+color: red
+font-size: 32px
+margin-block-start: 0.67em</pre>
+      <p>
+        <code>Style</code> не вычисляет координаты и размеры элементов. На этой стадии
+        браузер отвечает на вопрос “какие стили применяются?”, а не “где элемент
+        находится на экране?”.
+      </p>
+
+      <h3>Что происходит с CSSOM при изменении стилей</h3>
+      <p>
+        <strong>CSSOM</strong> — объектная модель CSS: представление таблиц стилей и
+        CSS-правил в виде объектов.
+      </p>
+      <p>Важно различать две разные операции:</p>
+      <pre>изменить CSSOM
+≠
+пересчитать стили элементов</pre>
+      <p>Если меняется класс элемента:</p>
+      <pre><code>button.classList.add("active");</code></pre>
+      <p>
+        CSSOM обычно не строится заново. CSS-правила уже есть в CSSOM. Изменился
+        DOM-элемент: у него появился новый class. Поэтому браузер заново проверяет,
+        какие существующие CSS-правила теперь подходят этому элементу, и пересчитывает
+        его computed styles.
+      </p>
+      <pre>class изменился
+→ CSSOM тот же
+→ Style recalculation для затронутых элементов</pre>
+      <p>Если меняется inline style:</p>
+      <pre><code>button.style.opacity = "0.5";</code></pre>
+      <p>
+        Это обновляет inline style конкретного элемента. Браузеру снова нужно
+        пересчитать computed styles для этого элемента, но это не означает пересборку
+        всех stylesheet-ов документа.
+      </p>
+      <pre>style="" изменился
+→ inline declarations элемента изменились
+→ Style recalculation</pre>
+      <p>CSSOM обновляется, когда меняется сама таблица стилей или набор правил.</p>
+      <pre><code>document.styleSheets[0].insertRule(".active { color: red }");</code></pre>
+      <p>
+        В этом случае меняется <code>CSSStyleSheet</code>: объект таблицы стилей получает
+        новое правило. После такого изменения браузер должен учитывать обновлённые
+        правила при следующем вычислении стилей.
+      </p>
+      <pre>CSS rule добавлено / удалено / изменено
+→ CSSOM обновился
+→ Style recalculation</pre>
+      <p>
+        Поэтому в pipeline стадия называется <code>Style</code>, а не
+        <code>Build CSSOM</code>: при обычном обновлении страницы браузер чаще
+        использует уже существующий CSSOM и пересчитывает применимые стили.
+      </p>
+    </section>
+
+    <section>
+      <h2>3. Layout</h2>
+      <p>
+        <strong>Layout</strong> — стадия вычисления геометрии элементов: их размеров
+        и положения.
+      </p>
+      <p>
+        После <code>Style</code> браузер знает, какие стили применяются. Но ему ещё нужно
+        понять, какие boxes появляются на странице, какого они размера и где находятся.
+      </p>
+      <pre>computed styles
++ размер viewport
++ правила layout
+→ размеры и координаты boxes</pre>
+      <p>
+        <strong>Viewport</strong> — видимая область страницы в окне браузера.
+      </p>
+      <p>
+        <strong>Box</strong> — прямоугольная область, которую элемент занимает в layout.
+      </p>
+      <p>Пример:</p>
+      <pre><code>.container {
+  width: 600px;
+}
+
+.item {
+  width: 50%;
+}</code></pre>
+      <p>
+        Чтобы вычислить ширину <code>.item</code>, браузеру нужно знать ширину родителя
+        <code>.container</code>. Поэтому layout зависит от контекста: изменение одного
+        элемента может повлиять на дочерние элементы, соседние блоки и переносы строк.
+      </p>
+      <p>Свойства, которые часто могут затрагивать layout:</p>
+      <pre>width
+height
+top
+left
+margin
+padding
+display
+position</pre>
+      <p>
+        Повторный layout часто называют <strong>reflow</strong>. Это повторное
+        вычисление размеров и положения после изменения страницы.
+      </p>
+      <p>Пример:</p>
+      <pre><code>box.style.width = "400px";</code></pre>
+      <p>
+        Такое изменение может потребовать нового layout, потому что изменилась
+        геометрия элемента.
+      </p>
+    </section>
+
+    <section>
+      <h2>4. Paint</h2>
+      <p>
+        <strong>Paint</strong> — стадия подготовки рисования. После <code>Layout</code>
+        браузер знает, где находятся элементы и какого они размера. Теперь нужно
+        подготовить, что именно будет нарисовано.
+      </p>
+      <p>Paint включает визуальные части:</p>
+      <pre>текст
+цвета
+фоны
+границы
+тени
+изображения
+части form controls</pre>
+      <p>
+        Результат этой стадии можно представить как записи о том, что и в каком
+        порядке нужно нарисовать.
+      </p>
+      <pre>layout data
+→ paint records</pre>
+      <p>
+        Изменения, которые меняют внешний вид, но не меняют геометрию, могут
+        пропустить <code>Layout</code>, но потребовать <code>Paint</code>.
+      </p>
+      <p>Примеры:</p>
+      <pre>color
+background-color
+background-image
+box-shadow</pre>
+      <p>
+        Если меняется цвет текста, браузеру не нужно заново рассчитывать положение
+        элементов. Но затронутую область нужно заново нарисовать.
+      </p>
+    </section>
+
+    <section>
+      <h2>5. Composite</h2>
+      <p>
+        <strong>Composite</strong> — стадия сборки итогового кадра. Браузер может
+        разделять страницу на слои, а затем собирать эти слои в правильном порядке.
+      </p>
+      <pre>layers
+→ compositing
+→ final frame</pre>
+      <p>
+        <strong>Layer</strong> — отдельная поверхность, которую браузер может
+        подготовить независимо от других частей страницы.
+      </p>
+      <p>Compositing важен, когда элементы перекрываются или перемещаются.</p>
+      <p>Пример:</p>
+      <pre><code>.modal {
+  position: fixed;
+  z-index: 100;
+}</code></pre>
+      <p>
+        Модальное окно должно оказаться поверх основного контента. На стадии
+        <code>Composite</code> браузер собирает подготовленные части изображения
+        в итоговый кадр с правильным порядком наложения.
+      </p>
+      <p><code>Composite</code> не равен <code>Paint</code>.</p>
+      <pre>Paint
+→ подготовить, что нужно нарисовать
+
+Composite
+→ собрать подготовленные слои в итоговый кадр</pre>
+      <p>
+        В Chromium часть этой работы может выполнять compositor thread — отдельный
+        поток, связанный со сборкой кадра.
+      </p>
+    </section>
+
+    <section>
+      <h2>6. Три типичных пути pipeline</h2>
+      <p>
+        Визуальное изменение может пройти по разным путям.
+      </p>
+
+      <h3>Полный путь</h3>
+      <pre>JavaScript / CSS
+→ Style
+→ Layout
+→ Paint
+→ Composite</pre>
+      <p>Такой путь нужен, когда изменение влияет на геометрию.</p>
+      <p>Примеры:</p>
+      <pre>width
+height
+left
+top
+margin
+padding</pre>
+
+      <h3>Без Layout</h3>
+      <pre>JavaScript / CSS
+→ Style
+→ Paint
+→ Composite</pre>
+      <p>
+        Такой путь возможен, когда изменение влияет на внешний вид, но не меняет
+        размеры и положение.
+      </p>
+      <p>Примеры:</p>
+      <pre>color
+background-color
+box-shadow</pre>
+
+      <h3>Только Composite после Style</h3>
+      <pre>JavaScript / CSS
+→ Style
+→ Composite</pre>
+      <p>
+        Такой путь возможен, когда изменение не требует ни нового layout, ни нового paint.
+      </p>
+      <p>Типичные свойства:</p>
+      <pre>transform
+opacity</pre>
+      <p>
+        Эти свойства часто используют для анимаций, потому что браузер может
+        изменить способ сборки слоя без полного пересчёта геометрии и без
+        перерисовки содержимого.
+      </p>
+      <p>
+        Но это не означает, что <code>transform</code> и <code>opacity</code> всегда
+        бесплатны. Итоговая стоимость зависит от реализации браузера, количества слоёв,
+        размера элемента и сложности страницы.
+      </p>
+    </section>
+
+    <section>
+      <h2>7. Кадры и jank</h2>
+      <p>
+        Экран обновляется с определённой частотой. Для 60 Hz это примерно 60 обновлений
+        в секунду.
+      </p>
+      <pre>1000 ms / 60 ≈ 16.67 ms на кадр</pre>
+      <p>
+        Части этого времени нужны самому браузеру, поэтому для плавной анимации
+        полезно целиться примерно в 10 ms работы на кадр.
+      </p>
+      <p>
+        <strong>Jank</strong> — видимые рывки или пропуски кадров. Он появляется, когда
+        браузер не успевает подготовить следующий кадр вовремя.
+      </p>
+      <p>Причины могут быть разными:</p>
+      <pre>долгий JavaScript
+дорогой Style
+дорогой Layout
+большой Paint
+слишком много layers
+дорогие визуальные эффекты</pre>
+      <p>
+        Производительность интерфейса зависит не только от JavaScript, но и от того,
+        какие стадии rendering pipeline запускает изменение.
+      </p>
+    </section>
+
+    <section>
+      <h2>8. Первичный render и обновления</h2>
+      <p>
+        Rendering pipeline используется и при первом показе страницы, и при
+        последующих изменениях.
+      </p>
+      <p>Первичный render:</p>
+      <pre>HTML разобран
+CSS разобран
+DOM / CSSOM готовы
+→ Style
+→ Layout
+→ Paint
+→ Composite</pre>
+      <p>Обновление страницы:</p>
+      <pre>DOM или стили изменились
+→ нужные стадии pipeline
+→ новый кадр</pre>
+      <p>
+        Браузер старается выполнять только необходимую работу. Небольшое изменение
+        не обязано пересчитывать всю страницу. Но некоторые изменения распространяются
+        широко: например, изменение ширины контейнера может повлиять на дочерние
+        элементы, переносы строк и положение соседних блоков.
+      </p>
+    </section>
+
+    <section>
+      <h2>9. Что важно не перепутать</h2>
+      <pre>Style ≠ CSS parsing</pre>
+      <p>CSS parsing строит или обновляет CSSOM. Style вычисляет применимые стили для DOM-элементов.</p>
+      <pre>CSSOM rebuild ≠ style recalculation</pre>
+      <p>CSSOM меняется, когда меняются stylesheet-ы или CSS-правила. Style recalculation происходит, когда браузер заново вычисляет стили элементов.</p>
+      <pre>class change ≠ CSSOM rebuild</pre>
+      <p>Изменение класса обычно не меняет CSSOM. Оно меняет DOM-элемент, после чего браузер пересчитывает применимые стили.</p>
+      <pre>Layout ≠ Paint</pre>
+      <p>Layout вычисляет размеры и положение. Paint подготавливает рисование визуальных частей.</p>
+      <pre>Paint ≠ Composite</pre>
+      <p>Paint описывает, что нужно нарисовать. Composite собирает подготовленные части в итоговый кадр.</p>
+      <pre>Composite-only ≠ бесплатно</pre>
+      <p>Composite обычно дешевле layout и paint, но слои требуют памяти и управления.</p>
+      <pre>DOM update ≠ полный pipeline всей страницы</pre>
+      <p>Браузер может ограничить работу затронутыми частями, но масштаб пересчёта зависит от конкретного изменения.</p>
+    </section>
+
+    <section>
+      <h2>Источники</h2>
+      <ul>
+        <li><a href="https://web.dev/articles/rendering-performance">web.dev — Rendering performance</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/Performance/Guides/Critical_rendering_path">MDN Web Docs — Critical rendering path</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/Performance/Guides/How_browsers_work">MDN Web Docs — Populating the page: how browsers work</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/CSS_Object_Model">MDN Web Docs — CSS Object Model</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/CSSStyleSheet">MDN Web Docs — CSSStyleSheet</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/styleSheets">MDN Web Docs — Document: styleSheets property</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/style">MDN Web Docs — HTMLElement: style property</a></li>
+        <li><a href="https://developer.chrome.com/blog/inside-browser-part3">Chrome Developers — Inside look at modern web browser, part 3</a></li>
+        <li><a href="https://developer.chrome.com/docs/lighthouse/performance/non-composited-animations">Chrome Developers — Avoid non-composited animations</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
