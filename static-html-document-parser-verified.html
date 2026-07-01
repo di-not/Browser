@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Static HTML-документ</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>Static HTML-документ</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко о блоке</h2>
+      <p>
+        Статический HTML-документ — это основной HTML-документ страницы, который браузер
+        может разобрать, превратить в DOM и показать без запуска JavaScript-приложения.
+      </p>
+      <pre>Static HTML scenario
+→ Full HTML document
+→ HTML Parser читает HTML
+→ DOM создаётся по мере чтения HTML
+→ Обнаружение CSS / images / fonts
+→ Parser дошёл до конца HTML
+→ Можно сделать первый render?
+→ HTML виден пользователю
+→ Native browser behavior: links / forms / controls
+→ Static HTML интерактивен</pre>
+      <blockquote>
+        <p>
+          Браузер не превращает HTML в страницу одним действием. HTML проходит через
+          parser: текстовый поток становится tokens, tokens обрабатываются стадией
+          tree construction, а результатом становится DOM Document, который затем
+          может быть использован для отображения страницы.
+        </p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Границы блока</h2>
+      <p>
+        Блок начинается с HTML-документа, полученного как основной документ навигации:
+      </p>
+      <pre><code>&lt;!doctype html&gt;
+&lt;html lang="ru"&gt;
+  &lt;head&gt;
+    &lt;title&gt;Page&lt;/title&gt;
+    &lt;link rel="stylesheet" href="/style.css" /&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;h1&gt;Title&lt;/h1&gt;
+    &lt;p&gt;Text&lt;/p&gt;
+    &lt;a href="/about"&gt;About&lt;/a&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</code></pre>
+      <p>
+        Блок заканчивается состоянием, когда HTML уже виден, а страница обладает
+        базовой нативной интерактивностью: ссылки переходят по <code>href</code>,
+        формы отправляются по <code>action</code> и <code>method</code>, поля ввода
+        принимают фокус и текст, стандартные controls работают встроенными
+        механизмами браузера.
+      </p>
+      <p>Внутри блока находятся:</p>
+      <pre>HTML parsing
+→ tokenization
+→ tree construction
+→ DOM construction
+→ resource discovery
+→ parser complete
+→ first render possibility
+→ native interactivity</pre>
+      <p>
+        <code>DOMContentLoaded</code> стоит сразу после завершения parsing-а в общей
+        схеме загрузки документа. В этой статье он упоминается как следующая контрольная
+        точка, но сам механизм события не разбирается.
+      </p>
+    </section>
+
+    <section>
+      <h2>2. HTML parser</h2>
+      <p>
+        <code>HTML parser</code> — часть браузера, которая принимает входной поток HTML
+        и строит DOM <code>Document</code>.
+      </p>
+      <p>В HTML Standard модель parsing-а описана так:</p>
+      <pre>stream of code points
+→ tokenization
+→ tree construction
+→ Document</pre>
+      <p>
+        <code>Stream of code points</code> — поток символов, полученный после
+        декодирования байтов HTML-документа. Для parser-а это ещё не дерево и не
+        набор элементов, а последовательность символов:
+      </p>
+      <pre>&lt; h 1 &gt; T i t l e &lt; / h 1 &gt;</pre>
+      <p>Parser обрабатывает этот поток в два основных этапа.</p>
+      <p>
+        <code>Tokenization</code> — разбор текста на tokens. Token — промежуточная
+        единица parser-а: уже не сырой текст, но ещё не DOM node.
+      </p>
+      <p>
+        <code>Tree construction</code> — построение DOM tree из tokens. На этом этапе
+        parser не просто “читает теги”, а изменяет DOM <code>Document</code>: создаёт
+        элементы, вставляет их в подходящее место дерева, закрывает открытые элементы
+        и обрабатывает текстовые узлы.
+      </p>
+    </section>
+
+    <section>
+      <h2>3. Tokenization</h2>
+      <p>Tokenization превращает HTML-текст в поток tokens.</p>
+      <p>Пример:</p>
+      <pre><code>&lt;p class="lead"&gt;Hello&lt;/p&gt;</code></pre>
+      <p>Упрощённый поток tokens:</p>
+      <pre>start tag token: p, class="lead"
+character tokens: H e l l o
+end tag token: p</pre>
+      <p>Основные tokens для этой ветки:</p>
+      <p><code>DOCTYPE token</code> создаётся из:</p>
+      <pre><code>&lt;!doctype html&gt;</code></pre>
+      <p>
+        Он влияет на режим документа. Современный <code>&lt;!doctype html&gt;</code>
+        включает стандартный режим обработки.
+      </p>
+      <p><code>Start tag token</code> создаётся из открывающего тега:</p>
+      <pre><code>&lt;section id="main"&gt;&lt;/section&gt;</code></pre>
+      <p>
+        Он содержит имя тега и атрибуты. Именно такой token обычно приводит к созданию
+        element node.
+      </p>
+      <p><code>End tag token</code> создаётся из закрывающего тега:</p>
+      <pre><code>&lt;/section&gt;</code></pre>
+      <p>
+        Он сообщает tree construction, что соответствующий элемент должен быть закрыт.
+      </p>
+      <p>
+        <code>Character token</code> представляет текстовые символы между тегами.
+        Последовательность character tokens обычно превращается в <code>Text node</code>.
+      </p>
+      <pre>character tokens: H e l l o
+→ Text node: "Hello"</pre>
+      <p><code>Comment token</code> создаётся из HTML-комментария:</p>
+      <pre><code>&lt;!-- note --&gt;</code></pre>
+      <p>
+        Комментарий может попасть в DOM как comment node, но не отображается как обычный
+        текст страницы.
+      </p>
+      <p>
+        <code>EOF token</code> (<code>End Of File</code>) означает конец входного
+        HTML-потока. В диаграмме этому соответствует момент <code>Parser дошёл до конца HTML</code>.
+      </p>
+    </section>
+
+    <section>
+      <h2>4. Tree construction</h2>
+      <p>
+        Tree construction — стадия HTML parser-а, которая получает tokens от tokenizer-а
+        и изменяет DOM <code>Document</code>.
+      </p>
+      <pre>tokens
+→ tree construction
+→ DOM tree внутри Document</pre>
+      <p>
+        Она начинается не “после всего tokenization”, а работает по мере появления
+        tokens. Tokenizer создаёт следующий token, затем tree construction обрабатывает
+        его и обновляет DOM tree. Поэтому DOM строится постепенно.
+      </p>
+      <p>Пример:</p>
+      <pre><code>&lt;body&gt;
+  &lt;h1&gt;Hello&lt;/h1&gt;
+  &lt;p&gt;Text&lt;/p&gt;
+&lt;/body&gt;</code></pre>
+      <p>Упрощённо:</p>
+      <pre>start tag token: body
+→ создать HTMLBodyElement и вставить в документ
+
+start tag token: h1
+→ создать h1 внутри body
+
+character tokens: Hello
+→ создать Text node внутри h1
+
+end tag token: h1
+→ закрыть h1
+
+start tag token: p
+→ создать p внутри body
+
+character tokens: Text
+→ создать Text node внутри p</pre>
+      <p>Итоговая структура:</p>
+      <pre>Document
+└─ html
+   ├─ head
+   └─ body
+      ├─ h1
+      │  └─ "Hello"
+      └─ p
+         └─ "Text"</pre>
+      <p>
+        Tree construction выполняется браузером как часть HTML parser-а. Внутри этой
+        стадии браузер учитывает текущее место вставки, открытые элементы и правила HTML.
+        Поэтому DOM может отличаться от буквального текста HTML.
+      </p>
+      <p>Пример:</p>
+      <pre><code>&lt;ul&gt;
+  &lt;li&gt;One&lt;/li&gt;
+  &lt;li&gt;Two&lt;/li&gt;
+&lt;/ul&gt;</code></pre>
+      <p>
+        В HTML закрывающий <code>&lt;/li&gt;</code> может быть опущен, но parser всё
+        равно строит корректные элементы списка по правилам HTML.
+      </p>
+      <p>Главный вывод:</p>
+      <pre>HTML source ≠ DOM tree
+token ≠ DOM node</pre>
+      <p>
+        HTML source — исходный текст. Token — промежуточная инструкция parser-а.
+        DOM node — объект внутри построенного дерева документа.
+      </p>
+    </section>
+
+    <section>
+      <h2>5. DOM создаётся по мере чтения HTML</h2>
+      <p>
+        DOM (<code>Document Object Model</code>) — объектная модель документа. Это
+        дерево узлов, где узлами могут быть <code>Document</code>, elements, text nodes,
+        comments и другие части документа.
+      </p>
+      <p>
+        DOM construction является incremental: дерево расширяется по мере чтения HTML,
+        а не только после получения всего документа.
+      </p>
+      <pre>получена часть HTML
+→ tokenizer создаёт tokens
+→ tree construction вставляет nodes
+→ приходит следующая часть HTML
+→ parser продолжает
+→ DOM дополняется</pre>
+      <p>
+        Это важно для понимания видимости страницы. Браузер может начать parsing после
+        первого полученного chunk-а HTML и пытаться подготовить первый render на основе
+        уже доступных данных. Это не гарантирует мгновенный показ каждого узла, но
+        означает, что parsing, построение DOM и подготовка отображения не обязаны
+        ждать полного HTML-файла.
+      </p>
+    </section>
+
+    <section>
+      <h2>6. Обнаружение ресурсов</h2>
+      <p>
+        Во время parsing-а браузер встречает элементы, которые указывают на внешние ресурсы.
+      </p>
+      <pre><code>&lt;link rel="stylesheet" href="/style.css" /&gt;
+&lt;img src="/hero.png" alt="Hero" /&gt;
+&lt;link rel="preload" href="/font.woff2" as="font" crossorigin /&gt;</code></pre>
+      <p>
+        Это <code>resource discovery</code>: браузер обнаруживает ссылку на ресурс и
+        может начать его загрузку.
+      </p>
+      <p>Важно различать:</p>
+      <pre>resource discovered ≠ resource loaded
+resource loaded ≠ resource applied</pre>
+      <p>
+        CSS обычно обнаруживается через <code>&lt;link rel="stylesheet"&gt;</code> или
+        <code>&lt;style&gt;</code>. Изображения часто обнаруживаются через
+        <code>&lt;img src&gt;</code>. Шрифты чаще становятся известны после обработки CSS
+        с <code>@font-face</code>; напрямую из HTML они могут быть обнаружены через явный preload:
+      </p>
+      <pre><code>&lt;link rel="preload" href="/font.woff2" as="font" crossorigin /&gt;</code></pre>
+      <p>
+        Также у браузеров есть preload scanner: пока основной HTML parser строит DOM,
+        браузер может заранее искать важные ресурсы в доступной разметке и начинать их
+        загрузку. Это не меняет смысл основного блока: ресурс сначала должен быть
+        обнаружен, а загрузка и применение ресурса — следующий этап.
+        <a href="https://di-not.github.io/Browser/css-loading-cssom-inline-definitions.html">Подробнее про получение CSS и построение CSSOM</a>.
+      </p>
+    </section>
+
+    <section>
+      <h2>7. Parser дошёл до конца HTML</h2>
+      <p>
+        Момент <code>Parser дошёл до конца HTML</code> означает, что основной HTML input
+        обработан до конца.
+      </p>
+      <pre>HTML input
+→ tokenization
+→ tree construction
+→ EOF token
+→ parsing основного HTML завершён</pre>
+      <p>
+        К этому моменту DOM построен из HTML-документа. Но внешние ресурсы могут ещё загружаться.
+      </p>
+      <pre>parser complete ≠ all images loaded
+parser complete ≠ all fonts loaded
+parser complete ≠ load event</pre>
+      <p>
+        Следующая важная контрольная точка — <code>DOMContentLoaded</code>. Согласно MDN,
+        это событие срабатывает после того, как HTML-документ полностью разобран,
+        а deferred scripts и module scripts загружены и выполнены; оно не ждёт
+        изображения, subframes и async scripts. В чистом статическом HTML без app scripts
+        эта точка близка к завершению parsing-а, но всё равно является отдельным
+        событием жизненного цикла документа.
+        <a href="https://di-not.github.io/Browser/domcontentloaded-subresources-load.html">Подробнее про DOMContentLoaded</a>.
+      </p>
+    </section>
+
+    <section>
+      <h2>8. Первый render и видимость страницы</h2>
+      <p>
+        Блок <code>Можно сделать первый render?</code> означает, что браузер проверяет,
+        достаточно ли данных для первого визуального результата.
+      </p>
+      <p>Для статического HTML это можно представить так:</p>
+      <pre>часть DOM уже построена
++ есть нужные стили для показа
++ нет критичного блокера отображения
+→ можно показать первый результат</pre>
+      <p>
+        Первый render не обязательно строго ждёт конца всего HTML. Браузер может начать
+        parsing после первого chunk-а данных и пытаться рендерить опыт на основе уже
+        полученной информации. Но перед появлением пикселей HTML, CSS и JavaScript,
+        если он есть, должны быть обработаны в той мере, которая нужна для безопасного показа.
+      </p>
+      <p>
+        Полная цепочка rendering pipeline остаётся отдельной темой. Для этой ветки
+        достаточно зафиксировать: DOM и стили используются браузером для построения
+        видимого результата.
+        <a href="https://di-not.github.io/Browser/style-layout-paint-composite.html">Подробнее про Style → Layout → Paint → Compositing</a>.
+      </p>
+    </section>
+
+    <section>
+      <h2>9. Static HTML интерактивен</h2>
+      <p>
+        Статическая HTML-страница интерактивна без JavaScript-приложения, если используются
+        элементы с нативным поведением.
+      </p>
+      <p>Ссылка:</p>
+      <pre><code>&lt;a href="/about"&gt;About&lt;/a&gt;</code></pre>
+      <p>
+        <code>href</code> задаёт цель перехода. При активации ссылки браузер выполняет навигацию.
+      </p>
+      <p>Форма:</p>
+      <pre><code>&lt;form action="/search" method="get"&gt;
+  &lt;input name="q" /&gt;
+  &lt;button&gt;Search&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+      <p>
+        <code>action</code> задаёт URL обработки формы, а <code>method</code> — способ
+        отправки данных.
+      </p>
+      <p>
+        Controls — элементы управления вроде <code>input</code>, <code>button</code>,
+        <code>select</code>, <code>textarea</code>, <code>details</code>. Они могут
+        получать фокус, принимать ввод, переключаться, раскрываться и участвовать
+        в отправке формы без React, Vue или client-side router.
+      </p>
+      <pre>Static HTML interactive
+= нативная интерактивность HTML-элементов
+≠ SPA-интерактивность</pre>
+    </section>
+
+    <section>
+      <h2>10. Что важно не перепутать</h2>
+      <pre>HTML source ≠ DOM
+token ≠ DOM node
+tree construction ≠ rendering
+parser complete ≠ DOMContentLoaded
+DOMContentLoaded ≠ load
+resource discovered ≠ resource loaded
+font discovered in HTML ≠ font discovered through CSS
+static interactivity ≠ JavaScript app interactivity</pre>
+    </section>
+
+    <section>
+      <h2>Источники</h2>
+      <ul>
+        <li><a href="https://html.spec.whatwg.org/multipage/parsing.html">WHATWG HTML Standard — Parsing HTML documents</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document_Object_Model">MDN Web Docs — Document Object Model</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Glossary/DOM">MDN Web Docs — DOM glossary</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/DOMContentLoaded_event">MDN Web Docs — Document: DOMContentLoaded event</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/Performance/Guides/How_browsers_work">MDN Web Docs — Populating the page: how browsers work</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/Performance/Guides/Critical_rendering_path">MDN Web Docs — Critical rendering path</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Attributes/rel/preload">MDN Web Docs — rel="preload"</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/a">MDN Web Docs — &lt;a&gt;: The Anchor element</a></li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/form">MDN Web Docs — &lt;form&gt;: The Form element</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
