@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vanilla JS: как подключён app script и как он влияет на parsing, DOM и render</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>Vanilla JS: как подключён app script и как он влияет на parsing, DOM и render</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко о блоке</h2>
+      <p>Этот блок описывает, что происходит, когда HTML parser встречает JavaScript во время чтения HTML-документа.</p>
+      <pre>Обнаружение CSS / scripts / images / fonts
+→ Как подключён app script?
+   ├─ blocking classic
+   │  → Parser-blocking classic script
+   │  → Загрузить и выполнить script сейчас
+   │  → DOM создаётся по мере чтения HTML
+   │  → Можно сделать render?
+   │
+   ├─ defer / module
+   │  → загружается параллельно
+   │  → выполняется после parser complete
+   │  → DOM мог измениться / listeners навешены
+   │  → Можно сделать render?
+   │
+   ├─ async
+   │  → выполняется когда загрузился, порядок не гарантирован
+   │  → может изменить DOM / навесить listeners
+   │  → Можно сделать render?
+   │
+   └─ нет script
+      → DOM создаётся по мере чтения HTML
+      → Можно сделать render?</pre>
+      <blockquote>
+        <p>Способ подключения script определяет, будет ли HTML parser ждать загрузку и выполнение JavaScript, когда именно код получит доступ к DOM, может ли он изменить уже построенную часть документа и будет ли он задерживать <code>DOMContentLoaded</code>.</p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Границы блока</h2>
+      <p>Блок начинается, когда браузер при чтении HTML обнаруживает script.</p>
+      <pre><code>&lt;script src="/app.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code>&lt;script defer src="/app.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code>&lt;script async src="/app.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code>&lt;script type="module" src="/app.js"&gt;&lt;/script&gt;</code></pre>
+      <p>Блок заканчивается на моменте:</p>
+      <pre>Vanilla JS интерактивен</pre>
+    </section>
+
+    <section>
+      <h2>2. Classic script без async/defer</h2>
+      <p><code>Classic script</code> — обычный script без <code>type="module"</code>.</p>
+      <pre><code>&lt;script src="/app.js"&gt;&lt;/script&gt;</code></pre>
+      <p>Если такой script встречен parser-ом и у него нет <code>async</code>, <code>defer</code> и <code>type="module"</code>, он является parser-blocking script. Это значит: HTML parser останавливает чтение HTML, пока script не будет загружен и выполнен.</p>
+      <pre>HTML parser читает HTML
+→ встретил &lt;script src="/app.js"&gt;
+→ остановил parsing
+→ загрузил script
+→ выполнил script
+→ продолжил parsing HTML</pre>
+      <p>Если script inline, загрузки нет, но parsing всё равно останавливается на время выполнения:</p>
+      <pre><code>&lt;script&gt;
+  document.body.classList.add("loaded")
+&lt;/script&gt;</code></pre>
+      <p>Код выполняется в момент, когда parser дошёл до этого места документа. Поэтому script видит только ту часть DOM, которая уже построена выше по HTML.</p>
+      <pre><code>&lt;body&gt;
+  &lt;h1 id="title"&gt;Title&lt;/h1&gt;
+
+  &lt;script&gt;
+    document.querySelector("#title") // элемент уже есть
+    document.querySelector("#footer") // элемента ещё может не быть
+  &lt;/script&gt;
+
+  &lt;footer id="footer"&gt;Footer&lt;/footer&gt;
+&lt;/body&gt;</code></pre>
+      <p>Parser-blocking script может:</p>
+      <pre>прочитать уже построенный DOM
+изменить уже построенный DOM
+добавить listeners на существующие элементы
+вызвать document.write()</pre>
+      <p>После выполнения script parser продолжает чтение HTML, и DOM снова создаётся по мере чтения документа.</p>
+      <pre>Загрузить и выполнить script сейчас
+→ DOM создаётся по мере чтения HTML</pre>
+      <p><code>document.write()</code> важен отдельно: если он вызывается во время parsing, он может вставить текст в поток HTML, который parser затем обработает. Поэтому в старых страницах parser-blocking scripts могли менять сам поток документа.</p>
+    </section>
+
+    <section>
+      <h2>3. Влияние CSS на classic script</h2>
+      <p>Classic script без <code>async/defer</code> блокирует HTML parsing. Но на выполнение такого script могут влиять уже обнаруженные stylesheets.</p>
+      <p>Причина: JavaScript может читать данные, зависящие от CSS, например через <code>getComputedStyle()</code> или размеры элементов. Поэтому браузер может ждать загрузки и обработки уже обнаруженных stylesheet-ов перед выполнением script.</p>
+      <p><a href="https://di-not.github.io/Browser/css-loading-cssom-inline-definitions.html">Подробнее про получение CSS и построение CSSOM</a>.</p>
+      <p>Пример:</p>
+      <pre><code>&lt;link rel="stylesheet" href="/styles.css"&gt;
+&lt;script src="/app.js"&gt;&lt;/script&gt;</code></pre>
+      <p>Упрощённо:</p>
+      <pre>stylesheet обнаружен
+→ script обнаружен
+→ browser может ждать stylesheet
+→ script выполняется
+→ parser продолжает HTML</pre>
+      <p>Это не значит, что любой CSS всегда останавливает HTML parser. CSS loading обычно не блокирует parsing напрямую. Но CSS может задерживать выполнение scripts, а scripts уже могут задерживать parsing или <code>DOMContentLoaded</code>.</p>
+    </section>
+
+    <section>
+      <h2>4. defer</h2>
+      <p><code>defer</code> используется для внешнего classic script.</p>
+      <pre><code>&lt;script defer src="/app.js"&gt;&lt;/script&gt;</code></pre>
+      <p>Такой script загружается параллельно с HTML parsing, но не выполняется сразу при обнаружении.</p>
+      <pre>HTML parser встретил defer script
+→ script загружается параллельно
+→ parser продолжает читать HTML
+→ parser дошёл до конца HTML
+→ defer scripts выполняются
+→ DOMContentLoaded может быть поставлен в очередь</pre>
+      <p><code>defer</code> scripts выполняются после завершения parsing HTML и до <code>DOMContentLoaded</code>.</p>
+      <p>Для нескольких <code>defer</code> scripts сохраняется порядок в документе:</p>
+      <pre><code>&lt;script defer src="/vendor.js"&gt;&lt;/script&gt;
+&lt;script defer src="/app.js"&gt;&lt;/script&gt;</code></pre>
+      <p><code>vendor.js</code> должен выполниться раньше <code>app.js</code>.</p>
+      <p>К моменту выполнения <code>defer</code> script DOM основного HTML уже построен. Поэтому код может обращаться к элементам ниже по документу:</p>
+      <pre><code>&lt;button id="submit"&gt;Send&lt;/button&gt;
+
+&lt;script defer src="/app.js"&gt;&lt;/script&gt;</code></pre>
+      <pre><code>document.querySelector("#submit").addEventListener("click", () => {
+  console.log("click")
+})</code></pre>
+      <p>Важно: <code>defer</code> имеет смысл для external script с <code>src</code>. Для inline classic script он не работает как механизм отложенной загрузки.</p>
+    </section>
+
+    <section>
+      <h2>5. Module script</h2>
+      <p><code>Module script</code> подключается через <code>type="module"</code>.</p>
+      <pre><code>&lt;script type="module" src="/app.js"&gt;&lt;/script&gt;</code></pre>
+      <p>Module scripts по умолчанию ведут себя отложенно: они не блокируют HTML parser и выполняются после того, как HTML document разобран. Перед выполнением браузер загружает module graph — сам модуль и его зависимости.</p>
+      <pre><code>import { init } from "./init.js"
+
+init()</code></pre>
+      <p>Упрощённо:</p>
+      <pre>HTML parser встретил &lt;script type="module"&gt;
+→ модуль и зависимости загружаются
+→ parser продолжает HTML
+→ после parser complete модуль выполняется
+→ DOMContentLoaded ждёт выполнение module scripts</pre>
+      <p>Поэтому в общей диаграмме <code>defer / module</code> можно вести одной веткой:</p>
+      <pre>defer / module
+→ загружается параллельно
+→ выполняется после parser complete</pre>
+      <p>Различие в том, что module script работает как JavaScript module: имеет <code>import/export</code>, отдельную module scope и загрузку зависимостей.</p>
+    </section>
+
+    <section>
+      <h2>6. async</h2>
+      <p><code>async</code> script загружается параллельно и выполняется, когда стал доступен.</p>
+      <pre><code>&lt;script async src="/analytics.js"&gt;&lt;/script&gt;</code></pre>
+      <p>Он не ждёт конца HTML parsing и не сохраняет порядок относительно других async scripts.</p>
+      <pre>HTML parser встретил async script
+→ script загружается параллельно
+→ когда загрузился, выполняется
+→ порядок выполнения не гарантирован</pre>
+      <p>Если async script загрузился до завершения HTML parsing, его выполнение может прервать parsing на время выполнения кода.</p>
+      <pre>parser читает HTML
+→ async script загрузился
+→ parser временно уступает выполнение script
+→ script выполнен
+→ parser продолжает HTML</pre>
+      <p>Если async script загрузился позже, он выполнится уже после parsing.</p>
+      <pre>parser дошёл до конца HTML
+→ DOMContentLoaded мог уже произойти
+→ async script загрузился и выполнился</pre>
+      <p><code>DOMContentLoaded</code> не ждёт async scripts. Поэтому async подходит для кода, который не должен быть условием готовности DOM: аналитика, виджеты, независимые скрипты.</p>
+      <p>Async script может изменить DOM или навесить listeners, но момент выполнения зависит от загрузки. Поэтому код внутри async script не должен предполагать, что весь DOM уже построен, если он может выполниться до конца parsing.</p>
+    </section>
+
+    <section>
+      <h2>7. Нет script</h2>
+      <p>Если script не найден, HTML parser продолжает строить DOM без JavaScript-пауз.</p>
+      <pre>HTML parser читает HTML
+→ DOM создаётся по мере чтения HTML
+→ parser дошёл до конца HTML</pre>
+      <p>Но отсутствие app script не означает отсутствие интерактивности. Ссылки, формы и стандартные элементы управления работают за счёт нативного поведения браузера.</p>
+      <pre><code>&lt;a href="/about"&gt;About&lt;/a&gt;
+
+&lt;form action="/search" method="get"&gt;
+  &lt;input name="q"&gt;
+  &lt;button&gt;Search&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+      <p>JavaScript нужен для дополнительной логики: кастомного состояния, динамического изменения DOM, SPA-навигации, сложных listeners и других сценариев.</p>
+    </section>
+
+    <section>
+      <h2>8. Как scripts влияют на DOM</h2>
+      <p>JavaScript может работать только с тем DOM, который уже существует на момент выполнения.</p>
+      <p>Parser-blocking script выполняется прямо в месте встречи:</p>
+      <pre><code>&lt;h1 id="title"&gt;Title&lt;/h1&gt;
+
+&lt;script&gt;
+  document.querySelector("#title") // есть
+  document.querySelector("#later") // ещё нет
+&lt;/script&gt;
+
+&lt;p id="later"&gt;Later&lt;/p&gt;</code></pre>
+      <p>Defer и module scripts выполняются после завершения parsing, поэтому обычно видят весь DOM основного HTML-документа.</p>
+      <pre>parser complete
+→ defer/module script executed
+→ DOM уже построен</pre>
+      <p>Async script может выполниться до или после parser complete, поэтому его код должен учитывать оба варианта.</p>
+      <p>Практический приём — проверять <code>document.readyState</code> или слушать <code>DOMContentLoaded</code>, если script зависит от полного DOM.</p>
+      <pre><code>function init() {
+  const button = document.querySelector("button")
+  if (button) {
+    button.addEventListener("click", () => console.log("click"))
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init)
+} else {
+  init()
+}</code></pre>
+    </section>
+
+    <section>
+      <h2>9. Как scripts влияют на DOMContentLoaded</h2>
+      <p><code>DOMContentLoaded</code> срабатывает после того, как HTML полностью разобран, а deferred scripts и module scripts загружены и выполнены.</p>
+      <p><a href="https://di-not.github.io/Browser/domcontentloaded-subresources-load.html">Подробнее про DOMContentLoaded</a>.</p>
+      <pre>parser complete
+→ выполнить defer/module scripts
+→ DOMContentLoaded</pre>
+      <p>Parser-blocking classic scripts выполняются ещё во время parsing, поэтому они задерживают достижение <code>parser complete</code>.</p>
+      <pre>parser встретил blocking script
+→ parsing остановлен
+→ script загружен и выполнен
+→ parsing продолжен
+→ parser complete позже</pre>
+      <p>Async scripts не являются условием для <code>DOMContentLoaded</code>.</p>
+      <pre>async script загрузился до DCL → может выполниться до DCL
+async script загрузился после DCL → выполнится после DCL
+DOMContentLoaded его не ждёт</pre>
+      <p>Stylesheets связаны с этим косвенно: deferred и module scripts ждут stylesheets, а <code>DOMContentLoaded</code> ждёт deferred/module scripts. Поэтому CSS может косвенно задержать <code>DOMContentLoaded</code>.</p>
+    </section>
+
+    <section>
+      <h2>10. Как scripts связаны с render</h2>
+      <p>Script сам по себе не является стадией render pipeline. Он может изменить входные данные для render:</p>
+      <pre>изменить DOM
+изменить class
+изменить style
+добавить или удалить элементы
+изменить текст
+навесить listeners</pre>
+      <p><a href="https://di-not.github.io/Browser/style-layout-paint-composite.html">Подробнее про Style → Layout → Paint → Compositing</a>.</p>
+      <p>Если DOM или стили изменились, браузер может снова выполнить нужные стадии:</p>
+      <pre>Style
+→ Layout
+→ Paint
+→ Composite</pre>
+      <p>Render не обязан ждать app script всегда.</p>
+      <pre>defer/module script ещё не выполнен
+→ браузер всё равно может показать HTML,
+   если DOM и критичные стили готовы</pre>
+      <p>С другой стороны, parser-blocking script может задержать появление DOM ниже себя, а значит может задержать первый render той части страницы, которая находится ниже script.</p>
+      <p>Поэтому в диаграмме стрелки к <code>Можно сделать render?</code> идут от нескольких входов:</p>
+      <pre>DOM создаётся по мере чтения HTML
+CSSOM / нет внешнего CSS
+async effect / listeners</pre>
+      <p>Это означает, что render зависит от доступной DOM-структуры, применимых стилей и изменений, которые внёс script.</p>
+    </section>
+
+    <section>
+      <h2>11. Страница видна и интерактивность</h2>
+      <p>После render страница может быть видна пользователю, но это ещё не всегда означает готовность всего поведения.</p>
+      <p><code>Native browser behavior</code> — встроенное поведение браузера, которое не требует пользовательского JavaScript-кода. Например, ссылка с <code>href</code> может запускать навигацию, форма с <code>action</code> и <code>method</code> может отправлять данные, поле ввода может получать фокус и принимать текст.</p>
+      <pre><code>&lt;a href="/about"&gt;About&lt;/a&gt;
+
+&lt;form action="/search" method="get"&gt;
+  &lt;input name="q"&gt;
+  &lt;button&gt;Search&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+      <p>Если для поведения достаточно встроенных возможностей HTML, страница может быть интерактивной сразу после того, как соответствующие элементы доступны пользователю.</p>
+      <pre>Страница видна
+→ для поведения JS не нужен
+→ работает native browser behavior
+→ Vanilla scenario интерактивен</pre>
+      <p>Если поведение зависит от JavaScript, видимости страницы недостаточно. Код приложения должен выполниться и зарегистрировать обработчики событий.</p>
+      <p><code>Event listener</code> — функция, которую браузер вызовет, когда на выбранный объект придёт определённое событие. Например, <code>addEventListener("click", handler)</code> регистрирует обработчик клика.</p>
+      <pre><code>const button = document.querySelector("button")
+
+button.addEventListener("click", () => {
+  console.log("clicked")
+})</code></pre>
+      <p>В этом примере выполнение app script делает страницу интерактивной для custom JS-поведения, но не меняет внешний вид страницы. Регистрация обработчика события сама по себе не добавляет DOM-элементы, не меняет текст, не меняет <code>class</code>, не меняет inline styles и не меняет CSS-правила. Поэтому одно только навешивание listeners обычно не требует нового прохода через rendering pipeline.</p>
+      <pre>Страница видна
+→ ждать выполнения app script
+→ JS навесил обработчики
+→ Vanilla scenario интерактивен</pre>
+      <p>В этой цепочке нет обязательного шага:</p>
+      <pre>Style
+→ Layout
+→ Paint
+→ Composite</pre>
+      <p>Новый render нужен только тогда, когда при выполнении app script изменилось что-то, влияющее на отображение.</p>
+      <p>Пример без визуального изменения:</p>
+      <pre><code>button.addEventListener("click", handleClick)</code></pre>
+      <pre>JS зарегистрировал listener
+→ pixels не изменились
+→ render pipeline не нужен
+→ Vanilla scenario интерактивен</pre>
+      <p>Пример с визуальным изменением:</p>
+      <pre><code>button.addEventListener("click", handleClick)
+
+button.classList.add("ready")
+button.textContent = "Ready"
+button.style.display = "block"</code></pre>
+      <pre>JS зарегистрировал listener
++ изменил class / text / style
+→ браузер должен обновить визуальный результат
+→ Style / Layout / Paint / Composite по необходимости</pre>
+      <p>Не каждое визуальное изменение запускает весь pipeline. Если изменился <code>class</code>, браузер сначала пересчитывает стили. Если новое значение влияет на размеры или положение, понадобится <code>Layout</code>. Если меняется только цвет или фон, <code>Layout</code> может быть не нужен, но может понадобиться <code>Paint</code>. Если меняется <code>transform</code> или <code>opacity</code> в подходящих условиях, браузер может обойтись <code>Composite</code>.</p>
+      <p>Момент готовности custom JS-поведения зависит от способа подключения script:</p>
+      <pre>blocking classic
+→ может навесить handlers во время parsing,
+   но только на уже существующие DOM-элементы
+
+defer / module
+→ обычно навешивает handlers после parser complete,
+   до DOMContentLoaded
+
+async
+→ может навесить handlers раньше или позже,
+   в зависимости от момента загрузки и выполнения</pre>
+      <p>Важное различие:</p>
+      <pre>видимость страницы
+≠
+готовность custom JS-поведения</pre>
+      <p>Элемент может быть уже виден и работать нативно, но custom-логика появится только после выполнения script. Например, обычная кнопка может быть видимой, но открытие кастомного меню начнёт работать только после того, как script найдёт эту кнопку и зарегистрирует обработчик события.</p>
+      <p>Ещё одно важное различие:</p>
+      <pre>готовность custom JS-поведения
+≠
+обязательная перерисовка</pre>
+      <p>Если script только зарегистрировал обработчики, страница стала интерактивнее с точки зрения поведения, но её пиксели могли не измениться.</p>
+    </section>
+
+    <section>
+      <h2>12. Что важно не перепутать</h2>
+      <pre>parser-blocking ≠ render-blocking</pre>
+      <p>Обычный classic script без async/defer блокирует HTML parsing. Он не обязательно является render-blocking в том же смысле, что критичный CSS, но может задержать render, потому что задерживает построение DOM.</p>
+      <pre>defer ≠ async</pre>
+      <p><code>defer</code> ждёт конца parsing и сохраняет порядок. <code>async</code> выполняется, когда загрузился, порядок не гарантирован.</p>
+      <pre>module ≈ defer по времени выполнения, но это не classic script</pre>
+      <p>Module script имеет module graph, <code>import/export</code> и отдельную область видимости.</p>
+      <pre>async ≠ DOM готов</pre>
+      <p>Async script может выполниться до того, как parser дошёл до конца HTML.</p>
+      <pre>DOMContentLoaded ≠ async scripts loaded</pre>
+      <p><code>DOMContentLoaded</code> не ждёт async scripts.</p>
+      <pre>script executed ≠ UI уже отрисован</pre>
+      <p>После выполнения script браузеру ещё может понадобиться Style, Layout, Paint и Composite.</p>
+      <pre>listeners навешены ≠ элемент был виден до этого момента</pre>
+      <p>Элемент мог быть виден раньше, но стать интерактивным для custom JS только после навешивания listener.</p>
+      <pre>страница видна ≠ custom JS-поведение готово</pre>
+      <p>Первый render может показать кнопку, меню или форму до того, как app script зарегистрировал обработчики.</p>
+      <pre>native browser behavior ≠ app behavior</pre>
+      <p>Ссылки, формы и поля ввода имеют встроенное поведение браузера. Кастомная логика, например открытие собственного dropdown, требует выполнения JavaScript.</p>
+      <pre>готовность custom JS-поведения ≠ обязательная перерисовка</pre>
+      <p>Если app script только зарегистрировал обработчики событий, pixels не меняются. Rendering pipeline нужен только при изменениях DOM, текста, class, inline styles, CSS-правил или других данных, влияющих на отображение.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>Источники</h2>
+      <ul>
+        <li>WHATWG HTML Standard — Scripting<br><a href="https://html.spec.whatwg.org/multipage/scripting.html">https://html.spec.whatwg.org/multipage/scripting.html</a></li>
+        <li>MDN Web Docs — <code>&lt;script&gt;</code>: The Script element<br><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script">https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script</a></li>
+        <li>MDN Web Docs — Document: DOMContentLoaded event<br><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/DOMContentLoaded_event">https://developer.mozilla.org/en-US/docs/Web/API/Document/DOMContentLoaded_event</a></li>
+        <li>MDN Web Docs — Document: readyState property<br><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/readyState">https://developer.mozilla.org/en-US/docs/Web/API/Document/readyState</a></li>
+        <li>MDN Web Docs — Document: write() method<br><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/write">https://developer.mozilla.org/en-US/docs/Web/API/Document/write</a></li>
+        <li>MDN Web Docs — Critical rendering path<br><a href="https://developer.mozilla.org/en-US/docs/Web/Performance/Guides/Critical_rendering_path">https://developer.mozilla.org/en-US/docs/Web/Performance/Guides/Critical_rendering_path</a></li>
+        <li>web.dev — Understand the critical path<br><a href="https://web.dev/learn/performance/understanding-the-critical-path">https://web.dev/learn/performance/understanding-the-critical-path</a></li>
+        <li>MDN Web Docs — <code>&lt;a&gt;</code>: The Anchor element<br><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/a">https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/a</a></li>
+        <li>MDN Web Docs — <code>&lt;form&gt;</code>: The Form element<br><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/form">https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/form</a></li>
+        <li>MDN Web Docs — EventTarget: addEventListener() method<br><a href="https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener">https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener</a></li>
+        <li>web.dev — Rendering performance<br><a href="https://web.dev/articles/rendering-performance">https://web.dev/articles/rendering-performance</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
