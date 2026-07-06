@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>React SPA до React Render Phase: HTML shell, root container и запуск приложения</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>React SPA до React Render Phase: HTML shell, root container и запуск приложения</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко</h2>
+      <p>Этот материал описывает начальную часть client-rendered React SPA: от получения HTML shell до вызова <code>root.render(&lt;App /&gt;)</code>. Следующий блок, <code>React Render Phase</code>, сюда не входит.</p>
+      <pre>React SPA scenario
+→ HTML shell + root container + React bundle ref
+→ HTML Parser читает HTML shell
+→ DOM создаётся: появляется root container
+→ Обнаружение CSS / React module bundle / assets
+→ React bundle обычно defer/module
+→ Bundle загружается параллельно
+→ Можно показать HTML shell?
+→ Style → Layout → Paint → Composite
+→ HTML shell виден
+→ Parser дошёл до конца HTML shell
+→ React bundle загружен?
+→ Выполнить React bundle
+→ React bootstrap
+→ createRoot(root).render(App)
+→ React Render Phase</pre>
+      <blockquote>
+        <p>На этом участке браузер ещё не выполняет React Render Phase. Сначала он получает HTML shell, создаёт DOM-узел для React-приложения, обнаруживает CSS и JavaScript bundle, может показать HTML shell обычным браузерным rendering pipeline, а затем выполняет JavaScript-код, который вызывает <code>createRoot(...).render(...)</code>.</p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Что означает React SPA в этом диапазоне</h2>
+      <p><code>React SPA</code> — это React-приложение, которое запускается в браузере и отображает интерфейс внутри DOM-узла, уже существующего в HTML.</p>
+      <p>В client-rendered React SPA сервер обычно отдаёт не полный готовый React UI, а HTML shell: минимальный HTML-документ, в котором есть контейнер для приложения и ссылка на JavaScript-код приложения.</p>
+      <p>Пример минимального shell:</p>
+      <pre><code>&lt;body&gt;
+  &lt;div id="root"&gt;&lt;/div&gt;
+  &lt;script type="module" src="/assets/index.js"&gt;&lt;/script&gt;
+&lt;/body&gt;</code></pre>
+      <p><code>&lt;div id="root"&gt;&lt;/div&gt;</code> — это DOM-узел, в который позже будет отображено React-приложение. В React API такой узел передают в <code>createRoot(domNode)</code>. Официальная документация React описывает <code>createRoot</code> как API, который создаёт React root для отображения React-компонентов внутри DOM-узла браузера. Источник: <a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a>.</p>
+    </section>
+
+    <section>
+      <h2>2. HTML shell + root container + React bundle ref</h2>
+      <p><code>HTML shell</code> — минимальный HTML-каркас страницы, который браузер получает до выполнения React-приложения.</p>
+      <p>Обычно в нём есть три важные части:</p>
+      <pre>root container
+→ DOM-элемент, куда React позже отобразит приложение
+
+React bundle ref
+→ ссылка на JavaScript-файл приложения
+
+CSS / metadata / assets
+→ стили, метаданные, изображения или другие ресурсы</pre>
+      <p>Пример:</p>
+      <pre><code>&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+  &lt;head&gt;
+    &lt;meta charset="UTF-8"&gt;
+    &lt;title&gt;React SPA&lt;/title&gt;
+    &lt;link rel="stylesheet" href="/assets/index.css"&gt;
+    &lt;script type="module" src="/assets/index.js"&gt;&lt;/script&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;div id="root"&gt;&lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</code></pre>
+      <p><code>root container</code> и <code>React root</code> — разные вещи.</p>
+      <pre>root container
+→ обычный DOM-элемент из HTML, например &lt;div id="root"&gt;&lt;/div&gt;
+
+React root
+→ объект, который React создаёт через createRoot(domNode)</pre>
+      <p>Документация React показывает такой порядок: сначала код получает DOM-узел, затем вызывает <code>createRoot(domNode)</code>, затем вызывает <code>root.render(&lt;App /&gt;)</code>. Источник: <a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a>.</p>
+    </section>
+
+    <section>
+      <h2>3. HTML Parser читает HTML shell</h2>
+      <p>После получения HTML браузер начинает читать HTML shell. В процессе чтения он строит DOM.</p>
+      <p><code>DOM</code> — объектное представление HTML-документа: элементы, текст и связи между ними. В этом диапазоне ключевой результат — появление DOM-узла, который будет контейнером React-приложения.</p>
+      <pre><code>&lt;body&gt;
+  &lt;div id="root"&gt;&lt;/div&gt;
+&lt;/body&gt;</code></pre>
+      <p>После чтения этой части HTML в документе появляется элемент <code>div#root</code>.</p>
+      <pre>Document
+└─ html
+   └─ body
+      └─ div#root</pre>
+      <p>Позже стартовый JavaScript-код сможет найти этот элемент:</p>
+      <pre><code>const domNode = document.getElementById('root');</code></pre>
+      <p>React docs для добавления React в существующий проект показывает похожую идею: в HTML уже есть элемент, например <code>&lt;nav id="navigation"&gt;</code>, а React-компонент затем отображается внутри этого существующего DOM-элемента. Источник: <a href="https://react.dev/learn/add-react-to-an-existing-project">React docs — Add React to an Existing Project</a>.</p>
+    </section>
+
+    <section>
+      <h2>4. Обнаружение CSS / React module bundle / assets</h2>
+      <p>Пока HTML parser читает shell, браузер встречает ссылки на ресурсы.</p>
+      <p>Пример CSS:</p>
+      <pre><code>&lt;link rel="stylesheet" href="/assets/index.css"&gt;</code></pre>
+      <p>Пример JavaScript bundle:</p>
+      <pre><code>&lt;script type="module" src="/assets/index.js"&gt;&lt;/script&gt;</code></pre>
+      <p>Пример изображения:</p>
+      <pre><code>&lt;img src="/assets/logo.svg" alt="Logo"&gt;</code></pre>
+      <p><code>Asset</code> — дополнительный файл, который нужен странице или приложению: изображение, шрифт, CSS-файл, JavaScript-файл и так далее.</p>
+      <p>В этом месте важно только разделить роли:</p>
+      <pre>HTML parser
+→ создаёт DOM
+
+CSS
+→ относится к браузерному блоку загрузки CSS и CSSOM
+
+React bundle
+→ JavaScript-файл, который позже выполнит стартовый код приложения
+
+assets
+→ дополнительные ресурсы страницы или приложения</pre>
+      <p>CSS-ветка в этой статье не раскрывается подробно: она уже разобрана отдельно в материале <a href="https://di-not.github.io/Browser/css-loading-cssom-inline-definitions.html">CSS loading и CSSOM</a>. Здесь достаточно зафиксировать связь: если в shell есть CSS, браузер должен обработать CSS-часть перед корректным показом shell.</p>
+    </section>
+
+    <section>
+      <h2>5. React bundle обычно defer/module</h2>
+      <p>В диаграмме React bundle обозначен как обычно <code>defer/module</code>.</p>
+      <p>Это не правило React API. Для браузера React bundle — обычный JavaScript-ресурс. Его поведение при загрузке зависит от того, как он подключён в HTML.</p>
+      <p>Пример module script:</p>
+      <pre><code>&lt;script type="module" src="/assets/index.js"&gt;&lt;/script&gt;</code></pre>
+      <p>Современные React-проекты часто используют сборщик: Vite, Parcel, Rsbuild или другой инструмент. Сборщик берёт исходные файлы приложения и готовит файлы для браузера. React docs рекомендует начинать с Vite, Parcel или Rsbuild, если проект не требует React Native. Источник: <a href="https://react.dev/learn/build-a-react-app-from-scratch">React docs — Build a React app from Scratch</a>.</p>
+      <p>Точное поведение <code>defer</code>, <code>module</code>, <code>async</code> и parser-blocking scripts относится к браузерной механике script loading. Эта тема уже разобрана отдельно: <a href="https://di-not.github.io/Browser/vanilla-js-script-parsing-render-interactivity-render-note.html">Vanilla JS: app script, parsing, DOM и render</a>.</p>
+    </section>
+
+    <section>
+      <h2>6. Bundle загружается параллельно</h2>
+      <p><code>Bundle загружается параллельно</code> означает, что загрузка JavaScript-файла может идти одновременно с чтением HTML shell.</p>
+      <p>Упрощённая последовательность:</p>
+      <pre>parser встретил &lt;script type="module" src="/assets/index.js"&gt;
+→ браузер начал загрузку JavaScript-файла
+→ parser продолжает читать HTML shell
+→ DOM продолжает строиться</pre>
+      <p>Здесь важно различать загрузку и выполнение.</p>
+      <pre>загрузка bundle
+→ файл получается из сети или cache
+
+выполнение bundle
+→ JavaScript-код запускается в браузере</pre>
+      <p>До выполнения bundle React-приложение ещё не стартовало. Браузер только получает JavaScript-файл, который позже вызовет React API.</p>
+    </section>
+
+    <section>
+      <h2>7. Можно показать HTML shell?</h2>
+      <p>После того как у браузера появилась DOM-структура shell и необходимые стили для текущего отображения, он может перейти к показу shell.</p>
+      <pre>DOM с root container
++ CSS для shell
+→ можно показать HTML shell</pre>
+      <p>Это браузерный вопрос, а не React-вопрос. На этом этапе React-компоненты ещё не обязаны быть отрисованы React-ом.</p>
+      <p>Показ shell происходит через браузерный pipeline:</p>
+      <pre>Style
+→ Layout
+→ Paint
+→ Composite</pre>
+      <p>Этот pipeline подробно разобран в отдельном материале <a href="https://di-not.github.io/Browser/style-layout-paint-composite.html">Style → Layout → Paint → Composite</a>. В этой статье достаточно одного различия:</p>
+      <pre>браузерный render
+≠
+React Render Phase</pre>
+      <p>Браузерный render превращает DOM и CSS в пиксели. React Render Phase — это работа React, которая начинается после вызова <code>root.render(&lt;App /&gt;)</code>.</p>
+    </section>
+
+    <section>
+      <h2>8. HTML shell виден</h2>
+      <p><code>HTML shell виден</code> означает, что браузер уже показал то, что было в HTML shell.</p>
+      <p>Если shell содержит видимую разметку вне React root, пользователь может увидеть её до запуска React-приложения.</p>
+      <pre><code>&lt;body&gt;
+  &lt;header&gt;Loading app...&lt;/header&gt;
+  &lt;div id="root"&gt;&lt;/div&gt;
+&lt;/body&gt;</code></pre>
+      <p>Если shell содержит только пустой root container, пользователь может увидеть пустую область или почти пустую страницу.</p>
+      <pre><code>&lt;body&gt;
+  &lt;div id="root"&gt;&lt;/div&gt;
+&lt;/body&gt;</code></pre>
+      <p>В таком случае фраза <code>HTML shell виден</code> не означает, что React UI уже виден. Она означает только то, что браузер смог отобразить текущий HTML shell.</p>
+      <p>React UI появится внутри root только после выполнения стартового кода React и вызова <code>root.render(&lt;App /&gt;)</code>. React docs прямо говорит: после создания root нужно вызвать <code>root.render</code>, чтобы отобразить React-компонент внутри него. Источник: <a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a>.</p>
+    </section>
+
+    <section>
+      <h2>9. Parser дошёл до конца HTML shell</h2>
+      <p>Когда HTML parser дошёл до конца shell, структура начального HTML-документа построена.</p>
+      <pre>HTML Parser читает HTML shell
+→ DOM создаётся: появляется root container
+→ Parser дошёл до конца HTML shell</pre>
+      <p>К этому моменту DOM-узел <code>#root</code> уже должен существовать, если он был в HTML.</p>
+      <pre><code>document.getElementById('root')</code></pre>
+      <p>Этот вызов может вернуть DOM-узел, который затем передаётся в <code>createRoot</code>.</p>
+      <p>Если DOM-узел не найден, <code>createRoot</code> не получает корректный контейнер. В troubleshooting для <code>createRoot</code> React docs описывает ошибку <code>Target container is not a DOM element</code>: она означает, что переданное значение не является DOM-элементом. Источник: <a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a>.</p>
+    </section>
+
+    <section>
+      <h2>10. React bundle загружен?</h2>
+      <p>После завершения parsing-а shell браузер может быть в одном из двух состояний:</p>
+      <pre>bundle уже загружен
+→ можно выполнить JavaScript-код
+
+bundle ещё не загружен
+→ нужно ждать завершения загрузки</pre>
+      <p>В диаграмме это отражено так:</p>
+      <pre>React bundle загружен?
+├─ Нет → Ждать React bundle
+└─ Да  → Выполнить React bundle</pre>
+      <p>Эта проверка всё ещё относится к загрузке JavaScript-ресурса. React Render Phase ещё не началась.</p>
+    </section>
+
+    <section>
+      <h2>11. Выполнить React bundle</h2>
+      <p>Когда React bundle загружен и наступил момент выполнения script, браузер запускает JavaScript-код приложения.</p>
+      <p>Типичный стартовый файл client-rendered React SPA выглядит так:</p>
+      <pre><code>import { createRoot } from 'react-dom/client';
+import App from './App.js';
+
+const domNode = document.getElementById('root');
+const root = createRoot(domNode);
+root.render(&lt;App /&gt;);</code></pre>
+      <p>В этом коде есть две разные части:</p>
+      <pre>обычный JavaScript startup
+→ imports, поиск DOM-узла, выполнение entry file
+
+React startup
+→ createRoot(domNode), затем root.render(&lt;App /&gt;)</pre>
+      <p><code>Выполнить React bundle</code> ещё не означает, что React UI уже появился на экране. На этом шаге браузер только выполняет JavaScript-файл. React начинает свою работу тогда, когда выполненный код доходит до вызова <code>root.render(&lt;App /&gt;)</code>.</p>
+      <p>React docs показывает именно такой стартовый порядок: импортировать <code>createRoot</code> из <code>react-dom/client</code>, найти DOM-узел, создать root и вызвать <code>root.render(&lt;App /&gt;)</code>. Источник: <a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a>.</p>
+    </section>
+
+    <section>
+      <h2>12. DOMContentLoaded может быть поставлен в очередь</h2>
+      <p>После выполнения React bundle в диаграмме есть отдельная подветка:</p>
+      <pre>Выполнить React bundle
+→ DOMContentLoaded может быть поставлен в очередь
+→ DOMContentLoaded</pre>
+      <p>Это браузерная часть, а не React-этап. <code>DOMContentLoaded</code> связан с готовностью HTML-документа и script-ов, которые должны выполниться до этого события.</p>
+      <p>Для React SPA с bundle, подключённым как <code>defer</code> или <code>type="module"</code>, важна такая последовательность:</p>
+      <pre>HTML parser дошёл до конца HTML shell
+→ deferred/module scripts загружены и выполнены
+→ DOMContentLoaded может быть поставлен в очередь</pre>
+      <p>Поэтому <code>DOMContentLoaded</code> в этой ветке логично расположен после выполнения React bundle. Если bundle относится к deferred/module scripts, браузер не должен поставить <code>DOMContentLoaded</code> раньше выполнения этого script.</p>
+      <p>Эта подветка не означает, что <code>DOMContentLoaded</code> ждёт завершения React Render Phase или появления React UI на экране. Она означает только готовность браузера поставить событие после завершения parsing-а и выполнения соответствующих scripts.</p>
+      <p>Подробности про <code>DOMContentLoaded</code>, <code>load</code> и ожидание subresources уже разобраны отдельно: <a href="https://di-not.github.io/Browser/domcontentloaded-subresources-load.html">DOMContentLoaded → subresources → load</a>.</p>
+    </section>
+
+    <section>
+      <h2>13. React bootstrap</h2>
+      <p><code>React bootstrap</code> — стартовая инициализация React-приложения в браузере.</p>
+      <p>В этом диапазоне bootstrap состоит из трёх действий:</p>
+      <pre>найти DOM-узел root container
+→ создать React root
+→ вызвать root.render(&lt;App /&gt;)</pre>
+      <p>Пример:</p>
+      <pre><code>const domNode = document.getElementById('root');
+const root = createRoot(domNode);
+root.render(&lt;App /&gt;);</code></pre>
+      <p><code>domNode</code> — обычный DOM-элемент из HTML. В этой ветке таким элементом обычно является <code>div#root</code>.</p>
+      <pre><code>&lt;div id="root"&gt;&lt;/div&gt;</code></pre>
+      <p><code>root</code> — React root, созданный через <code>createRoot(domNode)</code>. React docs описывает <code>createRoot</code> как API, который создаёт root для отображения React-компонентов внутри DOM-узла браузера. После создания root нужно вызвать <code>root.render</code>, чтобы React отобразил компонент внутри этого root. Источник: <a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a>.</p>
+      <p>Если DOM-узел не найден или в <code>createRoot</code> передано не DOM-значение, React не получает корректный контейнер. В troubleshooting для <code>createRoot</code> React docs описывает ошибку <code>Target container is not a DOM element</code>: она означает, что переданное значение не является DOM-элементом. Источник: <a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a>.</p>
+    </section>
+
+    <section>
+      <h2>14. createRoot(root).render(App)</h2>
+      <p>В диаграмме запись:</p>
+      <pre>createRoot(root).render(App)</pre>
+      <p>сжато обозначает две операции.</p>
+      <p>Первая операция создаёт React root:</p>
+      <pre><code>const root = createRoot(domNode);</code></pre>
+      <p>Вторая операция просит React отобразить приложение внутри этого root:</p>
+      <pre><code>root.render(&lt;App /&gt;);</code></pre>
+      <p>Это граница перед <code>React Render Phase</code>.</p>
+      <pre>root.render(&lt;App /&gt;)
+→ React Render Phase</pre>
+      <p>React docs по <code>Render and Commit</code> описывает дальнейшую работу React как процесс из трёх шагов:</p>
+      <pre>Trigger
+→ Render
+→ Commit</pre>
+      <p>В этой статье важна только граница: вызов <code>root.render(&lt;App /&gt;)</code> является trigger для initial render. Сама <code>React Render Phase</code>, вызов компонентов, последующий commit и DOM mutations относятся к следующему участку диаграммы. Источник: <a href="https://react.dev/learn/render-and-commit">React docs — Render and Commit</a>.</p>
+    </section>
+
+    <section>
+      <h2>15. Что важно не перепутать</h2>
+      <pre>HTML shell виден ≠ React UI виден</pre>
+      <p>Браузер может показать HTML shell до выполнения React bundle. Если внутри shell только пустой root container, React UI ещё не отображён.</p>
+      <pre>Browser render ≠ React render</pre>
+      <p><code>Style → Layout → Paint → Composite</code> выполняет браузер. <code>React Render Phase</code> выполняет React.</p>
+      <pre>Bundle загружен ≠ bundle выполнен</pre>
+      <p>Загрузка означает, что JavaScript-файл получен. Выполнение означает, что код из этого файла запущен.</p>
+      <pre>Bundle выполнен ≠ React Render Phase завершена</pre>
+      <p>После запуска bundle код ещё должен дойти до <code>root.render(&lt;App /&gt;)</code>. Этот вызов только запускает React-процесс; он не является завершением React render/commit-работы.</p>
+      <pre>DOMContentLoaded может быть поставлен в очередь ≠ React UI уже виден</pre>
+      <p><code>DOMContentLoaded</code> относится к parsing-у HTML и выполнению соответствующих scripts. Оно не означает, что React уже выполнил Render Phase, Commit Phase и что React UI уже появился на экране.</p>
+      <pre>React bundle обычно defer/module ≠ правило React</pre>
+      <p>Это относится к подключению script в HTML. React не определяет сам способ загрузки <code>&lt;script&gt;</code>.</p>
+      <pre>root container ≠ React root</pre>
+      <p>Root container — DOM-элемент из HTML. React root — объект, созданный через <code>createRoot(domNode)</code>.</p>
+      <pre>createRoot ≠ hydrateRoot</pre>
+      <p><code>createRoot</code> используется для client-rendered приложения. React docs отдельно указывает: если HTML был сгенерирован <code>react-dom/server</code>, нужно использовать <code>hydrateRoot</code>, а не <code>createRoot</code>. Источники: <a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a>, <a href="https://react.dev/reference/react-dom/client/hydrateRoot">React docs — hydrateRoot</a>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>Источники</h2>
+      <ul>
+        <li><a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a></li>
+        <li><a href="https://react.dev/learn/render-and-commit">React docs — Render and Commit</a></li>
+        <li><a href="https://react.dev/learn/add-react-to-an-existing-project">React docs — Add React to an Existing Project</a></li>
+        <li><a href="https://react.dev/learn/build-a-react-app-from-scratch">React docs — Build a React app from Scratch</a></li>
+        <li><a href="https://react.dev/reference/react-dom/client/hydrateRoot">React docs — hydrateRoot</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
