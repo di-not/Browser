@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>React initial render: первый render компонента, commit, useLayoutEffect и useEffect</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>React initial render: первый render компонента, commit, useLayoutEffect и useEffect</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко</h2>
+      <p><code>Initial render</code> — первый render компонента. В client-rendered React SPA он запускается после создания React root и вызова <code>root.render(&lt;App /&gt;)</code>.</p>
+      <pre><code>import { createRoot } from 'react-dom/client';
+import App from './App.js';
+
+const root = createRoot(document.getElementById('root'));
+root.render(&lt;App /&gt;);</code></pre>
+      <p>В этой статье рассматривается начальный путь:</p>
+      <pre>root.render(&lt;App /&gt;)
+→ React Render Phase
+→ React Commit Phase
+→ DOM mutations
+→ useLayoutEffect
+→ browser paint
+→ useEffect</pre>
+      <blockquote>
+        <p>Во время Render Phase React вызывает компоненты и вычисляет, какой UI нужен. Во время Commit Phase React применяет результат к DOM. <code>useLayoutEffect</code> выполняется после commit, но до того, как браузер перерисует экран. <code>useEffect</code> относится к passive effects и обычно выполняется после paint.</p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Что запускает initial render</h2>
+      <p>React docs в статье <a href="https://react.dev/learn/render-and-commit">Render and Commit</a> описывает две причины render-а компонента:</p>
+      <pre>это первый render компонента
+state компонента или одного из его предков обновился</pre>
+      <p>Здесь речь о первом варианте.</p>
+      <p>Для первого render-а нужно вызвать <code>root.render(...)</code>.</p>
+      <pre><code>const root = createRoot(document.getElementById('root'));
+root.render(&lt;App /&gt;);</code></pre>
+      <p><code>createRoot(domNode)</code> создаёт React root для DOM-узла браузера. DOM-узел — это обычный элемент документа, например <code>&lt;div id="root"&gt;&lt;/div&gt;</code>. React root — объект React, через который React управляет содержимым внутри этого DOM-узла.</p>
+      <pre><code>&lt;body&gt;
+  &lt;div id="root"&gt;&lt;/div&gt;
+&lt;/body&gt;</code></pre>
+      <pre><code>const domNode = document.getElementById('root');
+const root = createRoot(domNode);</code></pre>
+      <p>После создания root вызов <code>root.render(&lt;App /&gt;)</code> просит React отобразить компонент <code>App</code> внутри этого root. Это и есть trigger initial render — запуск первого render-а. Источник: <a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a>.</p>
+    </section>
+
+    <section>
+      <h2>2. Trigger initial render</h2>
+      <p><code>Trigger</code> — момент, когда React получает задачу подготовить UI.</p>
+      <pre>root.render(&lt;App /&gt;)
+→ trigger initial render</pre>
+      <p>Вызов <code>root.render(&lt;App /&gt;)</code> не означает, что DOM уже изменён в эту же секунду как готовый результат. Он запускает React-процесс.</p>
+      <p>Удобно разделять три шага:</p>
+      <pre>Trigger
+→ React получил запрос отобразить App
+
+Render
+→ React вызывает компоненты и вычисляет результат
+
+Commit
+→ React применяет результат к DOM</pre>
+      <p>React docs использует именно такую модель: trigger, render, commit. Источник: <a href="https://react.dev/learn/render-and-commit">React docs — Render and Commit</a>.</p>
+    </section>
+
+    <section>
+      <h2>3. Что такое React Render Phase</h2>
+      <p><code>React Render Phase</code> — этап, на котором React вызывает компоненты.</p>
+      <p>Компонент в React — функция, которая возвращает описание UI.</p>
+      <pre><code>function App() {
+  return &lt;h1&gt;Hello&lt;/h1&gt;;
+}</code></pre>
+      <p>Когда React выполняет initial render, он начинает с root component.</p>
+      <pre>root.render(&lt;App /&gt;)
+→ React вызывает App()</pre>
+      <p>Если <code>App</code> возвращает другие компоненты, React вызывает и их.</p>
+      <pre><code>function App() {
+  return (
+    &lt;main&gt;
+      &lt;Header /&gt;
+      &lt;Profile /&gt;
+    &lt;/main&gt;
+  );
+}
+
+function Header() {
+  return &lt;h1&gt;Hello&lt;/h1&gt;;
+}
+
+function Profile() {
+  return &lt;p&gt;User profile&lt;/p&gt;;
+}</code></pre>
+      <p>Упрощённая последовательность:</p>
+      <pre>React вызывает App()
+→ App возвращает JSX с Header и Profile
+→ React вызывает Header()
+→ Header возвращает JSX
+→ React вызывает Profile()
+→ Profile возвращает JSX
+→ React получает описание всего UI</pre>
+      <p>React docs описывает это как рекурсивный процесс: если компонент возвращает другой компонент, React render-ит следующий компонент, затем следующий, пока не поймёт, что нужно показать на экране. Источник: <a href="https://react.dev/learn/render-and-commit">React docs — Render and Commit</a>.</p>
+    </section>
+
+    <section>
+      <h2>4. JSX — это описание UI, а не DOM</h2>
+      <p>Компоненты возвращают JSX.</p>
+      <pre><code>function App() {
+  return &lt;button&gt;Save&lt;/button&gt;;
+}</code></pre>
+      <p><code>JSX</code> — синтаксис для описания UI. Он похож на HTML, но JSX не является DOM-узлом.</p>
+      <pre>JSX
+→ описание того, что React должен показать
+
+DOM
+→ реальные узлы документа в браузере</pre>
+      <p>Во время Render Phase React собирает описание:</p>
+      <pre>какие элементы нужны
+какой текст нужен
+какие props переданы компонентам
+какие атрибуты должны быть у элементов
+какие дочерние элементы вложены внутрь</pre>
+      <p>DOM-изменения на этом этапе ещё не выполняются. React сначала вычисляет результат, а затем применяет его на Commit Phase.</p>
+    </section>
+
+    <section>
+      <h2>5. Render Phase должна быть чистой</h2>
+      <p>React docs говорит, что компоненты и Hooks должны быть чистыми. Это значит: при одинаковых входных данных компонент должен возвращать одинаковый результат и не должен менять внешний мир во время render-а. Источник: <a href="https://react.dev/reference/rules/components-and-hooks-must-be-pure">React docs — Components and Hooks must be pure</a>.</p>
+      <p>Входные данные компонента:</p>
+      <pre>props
+state
+context</pre>
+      <p>Чистый компонент:</p>
+      <pre><code>function Greeting({ name }) {
+  return &lt;h1&gt;Hello, {name}&lt;/h1&gt;;
+}</code></pre>
+      <p>Он получает <code>name</code> и возвращает JSX. Он не изменяет DOM вручную, не меняет глобальные переменные, не запускает таймеры и не подписывается на внешние системы.</p>
+      <p>Нечистый компонент:</p>
+      <pre><code>let counter = 0;
+
+function BadComponent() {
+  counter = counter + 1;
+  return &lt;h1&gt;{counter}&lt;/h1&gt;;
+}</code></pre>
+      <p>Этот компонент меняет переменную, которая существовала до render-а. Такой код нарушает правило чистоты.</p>
+      <p><code>Side effect</code> — побочный эффект: действие, которое меняет что-то вне текущего вычисления.</p>
+      <p>Примеры побочных эффектов:</p>
+      <pre>изменить DOM вручную
+изменить глобальную переменную
+запустить timer
+отправить network request
+подписаться на внешний источник
+изменить объект, который существовал до render-а</pre>
+      <p>React docs объясняет: rendering logic может выполняться несколько раз, поэтому побочные эффекты во время render-а могут приводить к ошибкам и непредсказуемому поведению. Источники: <a href="https://react.dev/reference/rules/components-and-hooks-must-be-pure">Components and Hooks must be pure</a>, <a href="https://react.dev/learn/keeping-components-pure">Keeping Components Pure</a>.</p>
+    </section>
+
+    <section>
+      <h2>6. Что React делает на initial render</h2>
+      <p>Для initial render React вызывает root component и все вложенные компоненты, которые нужны для описания UI.</p>
+      <p>Пример:</p>
+      <pre><code>function App() {
+  return (
+    &lt;section&gt;
+      &lt;h1&gt;Dashboard&lt;/h1&gt;
+      &lt;button&gt;Refresh&lt;/button&gt;
+    &lt;/section&gt;
+  );
+}</code></pre>
+      <p>На Render Phase React получает описание:</p>
+      <pre>section
+→ h1 с текстом Dashboard
+→ button с текстом Refresh</pre>
+      <p>После Render Phase React знает, какие DOM-узлы нужно создать на Commit Phase.</p>
+      <pre>Render Phase
+→ вычислить, какой UI нужен
+
+Commit Phase
+→ создать и вставить DOM-узлы</pre>
+      <p>Для initial render React docs говорит, что React использует DOM API <code>appendChild()</code> для размещения созданных DOM nodes на экране. Источник: <a href="https://react.dev/learn/render-and-commit">React docs — Render and Commit</a>.</p>
+    </section>
+
+    <section>
+      <h2>7. React Commit Phase и DOM mutations внутри root</h2>
+      <p><code>Commit Phase</code> — этап, на котором React применяет результат render-а к DOM.</p>
+      <p>До commit в HTML может быть только пустой root container:</p>
+      <pre><code>&lt;body&gt;
+  &lt;div id="root"&gt;&lt;/div&gt;
+&lt;/body&gt;</code></pre>
+      <p>После initial commit внутри root появляются DOM-узлы, соответствующие результату React render-а.</p>
+      <pre><code>&lt;body&gt;
+  &lt;div id="root"&gt;
+    &lt;section&gt;
+      &lt;h1&gt;Dashboard&lt;/h1&gt;
+      &lt;button&gt;Refresh&lt;/button&gt;
+    &lt;/section&gt;
+  &lt;/div&gt;
+&lt;/body&gt;</code></pre>
+      <p><code>DOM mutations внутри root</code> — это изменения, которые React делает в DOM-дереве внутри контейнера, переданного в <code>createRoot</code>.</p>
+      <pre>root container
+→ &lt;div id="root"&gt;&lt;/div&gt;
+
+DOM mutations внутри root
+→ React добавляет, обновляет или удаляет DOM-узлы внутри этого контейнера</pre>
+      <p>Для initial render главная mutation — вставить в пустой контейнер DOM-узлы, которые соответствуют результату Render Phase.</p>
+      <pre>React Render Phase
+→ React понял, что нужен section, h1 и button
+
+React Commit Phase
+→ React создал DOM-узлы
+→ React вставил их внутрь root container</pre>
+      <p>Упрощённо это можно представить так:</p>
+      <pre>до commit:
+
+&lt;div id="root"&gt;&lt;/div&gt;
+
+
+после commit:
+
+&lt;div id="root"&gt;
+  &lt;section&gt;
+    &lt;h1&gt;Dashboard&lt;/h1&gt;
+    &lt;button&gt;Refresh&lt;/button&gt;
+  &lt;/section&gt;
+&lt;/div&gt;</pre>
+      <p>React docs для initial render говорит, что React использует DOM API <code>appendChild()</code> для размещения созданных DOM nodes на экране. Это не значит, что в реальном приложении всегда вызывается только один <code>appendChild()</code>. Важна идея: на initial commit React создаёт нужные DOM-узлы и помещает их в DOM внутри root container. Источник: <a href="https://react.dev/learn/render-and-commit">React docs — Render and Commit</a>.</p>
+      <p>React не начинает автоматически управлять всем HTML-документом. Он управляет содержимым внутри того DOM-узла, для которого создан root.</p>
+      <pre><code>&lt;body&gt;
+  &lt;header&gt;Outside React root&lt;/header&gt;
+
+  &lt;div id="root"&gt;
+    &lt;!-- React управляет этой областью --&gt;
+  &lt;/div&gt;
+&lt;/body&gt;</code></pre>
+      <p>В этом примере <code>&lt;header&gt;</code> находится вне root container. React не изменяет его как часть этого root. React работает внутри <code>#root</code>, потому что именно этот DOM-узел был передан в <code>createRoot(domNode)</code>.</p>
+    </section>
+
+    <section>
+      <h2>8. useLayoutEffect после commit и до paint</h2>
+      <p><code>useLayoutEffect</code> — Hook для кода, который должен выполниться после того, как React уже применил изменения к DOM, но до того, как браузер перерисует экран.</p>
+      <p>React docs формулирует это так: <code>useLayoutEffect</code> — версия <code>useEffect</code>, которая срабатывает до browser repaint. После commit компонента в DOM и до repaint браузера React запускает setup-функцию <code>useLayoutEffect</code>. Источник: <a href="https://react.dev/reference/react/useLayoutEffect">React docs — useLayoutEffect</a>.</p>
+      <p>Последовательность для initial render:</p>
+      <pre>React Render Phase
+→ React Commit Phase
+→ DOM уже изменён
+→ useLayoutEffect
+→ browser paint</pre>
+      <p><code>setup</code> — функция, которую передают в Hook.</p>
+      <pre><code>useLayoutEffect(() =&gt; {
+  // setup logic
+}, []);</code></pre>
+      <p>Пустой массив зависимостей <code>[]</code> означает, что для обычного production-сценария этот layout effect связан с mount компонента: он запускается после того, как компонент оказался в DOM.</p>
+      <p>Пример задачи для <code>useLayoutEffect</code> — измерить DOM-элемент до того, как пользователь увидит финальный результат.</p>
+      <pre><code>import { useLayoutEffect, useRef, useState } from 'react';
+
+function Tooltip() {
+  const ref = useRef(null);
+  const [height, setHeight] = useState(0);
+
+  useLayoutEffect(() =&gt; {
+    const rect = ref.current.getBoundingClientRect();
+    setHeight(rect.height);
+  }, []);
+
+  return &lt;div ref={ref}&gt;Tooltip height: {height}&lt;/div&gt;;
+}</code></pre>
+      <p>Почему здесь нужен именно <code>useLayoutEffect</code>:</p>
+      <pre>React вставил DOM
+→ можно измерить элемент
+→ effect запускается до paint
+→ state update из useLayoutEffect обрабатывается до paint
+→ пользователь не видит промежуточное положение</pre>
+      <p>React docs предупреждает: <code>useLayoutEffect</code> может ухудшить производительность, потому что блокирует browser repaint. Поэтому его нужно использовать только там, где важно выполнить код до paint, например для измерения layout и позиционирования UI. Источник: <a href="https://react.dev/reference/react/useLayoutEffect">React docs — useLayoutEffect</a>.</p>
+    </section>
+
+    <section>
+      <h2>9. Browser paint после layout effects</h2>
+      <p>После commit и layout effects браузер может обновить изображение на экране.</p>
+      <pre>React Commit Phase
+→ useLayoutEffect
+→ browser paint</pre>
+      <p><code>Browser paint</code> — не то же самое, что React render. React render — это вызов компонентов. Browser paint — это визуальное обновление экрана после того, как DOM уже изменён.</p>
+      <p>В общей браузерной схеме это соответствует блоку:</p>
+      <pre>Style
+→ Layout
+→ Paint
+→ Composite</pre>
+      <p>Подробно этот браузерный pipeline разобран отдельно: <a href="https://di-not.github.io/Browser/style-layout-paint-composite.html">Style → Layout → Paint → Composite</a>.</p>
+      <p>Для этой статьи важно только место в последовательности:</p>
+      <pre>DOM изменён React-ом
+→ layout effects уже выполнены
+→ браузер может показать результат пользователю</pre>
+    </section>
+
+    <section>
+      <h2>10. useEffect после paint</h2>
+      <p><code>useEffect</code> — Hook для синхронизации компонента с внешними системами.</p>
+      <p>React docs описывает <code>useEffect</code> как способ подключить компонент к внешней системе: browser API, network, сторонней библиотеке, подписке, timer-у и другим системам вне React. Источник: <a href="https://react.dev/reference/react/useEffect">React docs — useEffect</a>.</p>
+      <p>Пример:</p>
+      <pre><code>useEffect(() =&gt; {
+  const connection = createConnection(serverUrl, roomId);
+  connection.connect();
+
+  return () =&gt; {
+    connection.disconnect();
+  };
+}, [serverUrl, roomId]);</code></pre>
+      <p>Здесь:</p>
+      <pre>setup
+→ подключиться к внешней системе
+
+cleanup
+→ отключиться от внешней системы</pre>
+      <p>Для initial render с пустым массивом зависимостей:</p>
+      <pre><code>useEffect(() =&gt; {
+  console.log('Component mounted');
+}, []);</code></pre>
+      <p>effect запускается после того, как компонент был отрендерен и React применил изменения к DOM. В обычном случае <code>useEffect</code> не должен блокировать paint. React docs говорит: если effect делает визуальную работу и заметна задержка до его выполнения, нужно заменить <code>useEffect</code> на <code>useLayoutEffect</code>, потому что <code>useLayoutEffect</code> выполняется до browser paint. Источник: <a href="https://react.dev/reference/react/useEffect">React docs — useEffect</a>.</p>
+      <p>Упрощённая последовательность:</p>
+      <pre>React Render Phase
+→ React Commit Phase
+→ useLayoutEffect
+→ browser paint
+→ useEffect</pre>
+      <p>React DevTools Performance tracks описывает passive effects как фазу, где React выполняет такие Hooks, как <code>useEffect</code>; обычно это происходит после paint. Есть исключение для некоторых пользовательских взаимодействий, когда passive effects могут выполниться раньше paint. Для initial render React SPA обычно полезно держать в голове основную модель: <code>useEffect</code> не используется для блокирования первого paint. Источник: <a href="https://react.dev/reference/dev-tools/react-performance-tracks">React docs — React Performance tracks</a>.</p>
+    </section>
+
+    <section>
+      <h2>11. useLayoutEffect и useEffect: главное различие</h2>
+      <p>Оба Hook-а запускаются не во время Render Phase.</p>
+      <pre>Render Phase
+→ компоненты должны быть чистыми
+→ useLayoutEffect и useEffect здесь не выполняются</pre>
+      <p>Различие в моменте после commit:</p>
+      <pre>useLayoutEffect
+→ после DOM mutations
+→ до browser paint
+→ может читать layout и синхронно повлиять на то, что увидит пользователь
+
+useEffect
+→ passive effect
+→ обычно после browser paint
+→ подходит для синхронизации с внешними системами,
+   которая не должна блокировать показ экрана</pre>
+      <p>Если нужно измерить DOM и избежать видимого скачка интерфейса, подходит <code>useLayoutEffect</code>.</p>
+      <p>Если нужно подключиться к внешней системе, отправить analytics event, подписаться на событие, запустить timer или синхронизироваться после отображения, обычно подходит <code>useEffect</code>.</p>
+      <p>React docs прямо советует предпочитать <code>useEffect</code>, когда возможно, потому что <code>useLayoutEffect</code> может ухудшить производительность. Источник: <a href="https://react.dev/reference/react/useLayoutEffect">React docs — useLayoutEffect</a>.</p>
+    </section>
+
+    <section>
+      <h2>12. Strict Mode в development</h2>
+      <p>В development-сборке при включённом <code>&lt;StrictMode&gt;</code> React может выполнять дополнительные проверки.</p>
+      <p>React docs по Strict Mode говорит, что в development компоненты могут re-render-иться дополнительный раз, а Effects могут запускаться дополнительный раз, чтобы найти ошибки, связанные с нечистым render-ом и отсутствующим cleanup. Источник: <a href="https://react.dev/reference/react/StrictMode">React docs — StrictMode</a>.</p>
+      <p>Это не меняет основную production-модель:</p>
+      <pre>render
+→ commit
+→ layout effects
+→ paint
+→ passive effects</pre>
+      <p>Но при чтении логов в development можно увидеть больше вызовов, чем ожидалось. Это нормально для Strict Mode и нужно для поиска ошибок.</p>
+    </section>
+
+    <section>
+      <h2>13. React UI виден и готовность к действиям пользователя</h2>
+      <p>После Commit Phase, layout effects и браузерного paint пользователь может увидеть React UI.</p>
+      <pre>React Commit Phase
+→ DOM mutations внутри root
+→ useLayoutEffect
+→ browser paint
+→ React UI виден пользователю</pre>
+      <p><code>React UI виден пользователю</code> означает, что браузер уже показал DOM-результат, который React вставил внутрь root container.</p>
+      <pre><code>&lt;div id="root"&gt;
+  &lt;section&gt;
+    &lt;h1&gt;Dashboard&lt;/h1&gt;
+    &lt;button&gt;Refresh&lt;/button&gt;
+  &lt;/section&gt;
+&lt;/div&gt;</code></pre>
+      <p>Но видимость UI и готовность к действиям пользователя — не одно и то же. Для React-приложения важна ещё готовность event handlers.</p>
+      <p><code>Event handler</code> — функция, которую React вызовет при пользовательском событии: клике, вводе текста, отправке формы, фокусе и так далее.</p>
+      <pre><code>function App() {
+  function handleClick() {
+    console.log('Refresh clicked');
+  }
+
+  return &lt;button onClick={handleClick}&gt;Refresh&lt;/button&gt;;
+}</code></pre>
+      <p>В React обработчики событий обычно задаются прямо в JSX через props вроде <code>onClick</code>, <code>onChange</code>, <code>onSubmit</code>, <code>onFocus</code>.</p>
+      <pre><code>&lt;button onClick={handleClick}&gt;Refresh&lt;/button&gt;</code></pre>
+      <p>Когда React выполнил render и commit, DOM-элемент уже находится внутри root, а React знает, какой handler связан с этим элементом. Поэтому после commit и показа UI можно говорить, что React UI готов к действиям пользователя.</p>
+      <pre>React UI виден пользователю
+→ React UI interactive / event handlers готовы
+→ React SPA готово к действиям пользователя</pre>
+      <p><code>React UI interactive</code> означает: пользователь может взаимодействовать с элементами, а React сможет обработать соответствующие события через event handlers, объявленные в компонентах.</p>
+      <p>Важно не смешивать три состояния:</p>
+      <pre>HTML shell виден
+→ браузер показал начальный HTML
+
+React UI виден
+→ React сделал commit, браузер показал DOM внутри root
+
+React UI interactive
+→ event handlers для React UI готовы к пользовательским событиям</pre>
+      <p>Для initial render эти состояния могут идти последовательно:</p>
+      <pre>HTML shell виден
+→ React bundle выполнен
+→ root.render(&lt;App /&gt;)
+→ React Render Phase
+→ React Commit Phase
+→ DOM mutations внутри root
+→ browser paint
+→ React UI виден пользователю
+→ React UI interactive / event handlers готовы
+→ React SPA готово к действиям пользователя</pre>
+      <p>Если компонент содержит только статическую разметку без custom React handlers, UI всё равно может быть видимым и часть нативного поведения браузера будет работать. Но фраза <code>React SPA готово к действиям пользователя</code> в этой диаграмме означает, что React-приложение не только показало UI, но и готово обрабатывать пользовательские действия через свои React event handlers.</p>
+      <p>React docs описывает event handlers как функции, которые запускаются в ответ на взаимодействия пользователя: click, hover, focus input и другие события. Источник: <a href="https://react.dev/learn/responding-to-events">React docs — Responding to Events</a>.</p>
+    </section>
+
+    <section>
+      <h2>14. Initial render и управление root</h2>
+      <p>После initial render React управляет содержимым внутри root container.</p>
+      <pre><code>&lt;body&gt;
+  &lt;header&gt;Outside React root&lt;/header&gt;
+  &lt;div id="root"&gt;
+    &lt;!-- React управляет этой областью --&gt;
+  &lt;/div&gt;
+&lt;/body&gt;</code></pre>
+      <p>Элементы вне root container остаются обычной частью HTML-документа. React не начинает автоматически управлять всем документом; он управляет тем DOM-узлом, для которого был создан root.</p>
+      <p>React docs по <code>createRoot</code> говорит: для приложения, полностью построенного на React, обычно нужен один root для root component. Если на странице есть несколько независимых областей, можно создать отдельный root для каждой из них. Источник: <a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a>.</p>
+    </section>
+
+    <section>
+      <h2>15. Что важно не перепутать</h2>
+      <pre>initial render ≠ re-render</pre>
+      <p>Initial render — первый render компонента. Re-render — последующий render после обновления state, props или context.</p>
+      <pre>root.render(&lt;App /&gt;) ≠ DOM уже полностью готов как результат</pre>
+      <p><code>root.render(&lt;App /&gt;)</code> запускает React-процесс. React должен вызвать компоненты, вычислить UI и применить результат к DOM.</p>
+      <pre>React Render Phase ≠ browser rendering</pre>
+      <p>React Render Phase — вызов компонентов. Browser rendering — визуальное обновление экрана после DOM-изменений.</p>
+      <pre>JSX ≠ DOM</pre>
+      <p>JSX описывает UI. DOM-узлы создаются и вставляются позже.</p>
+      <pre>useLayoutEffect ≠ useEffect</pre>
+      <p><code>useLayoutEffect</code> выполняется после commit, но до browser paint. <code>useEffect</code> обычно выполняется после paint.</p>
+      <pre>DOM mutations внутри root ≠ управление всем document</pre>
+      <p>React применяет изменения внутри DOM-узла, переданного в <code>createRoot</code>. Элементы вне этого root не становятся частью этого React root.</p>
+      <pre>React UI виден ≠ React SPA готово к действиям пользователя</pre>
+      <p>UI может быть показан после browser paint, но готовность SPA означает ещё и готовность React event handlers к пользовательским событиям.</p>
+      <pre>Effect ≠ render logic</pre>
+      <p>Render должен быть чистым. Effects нужны для синхронизации с внешними системами после render/commit.</p>
+      <pre>initial render ≠ hydration</pre>
+      <p>В этой статье рассматривается <code>createRoot</code>. Для HTML, уже сгенерированного React на сервере, React docs указывает использовать <code>hydrateRoot</code>, а не <code>createRoot</code>. Источник: <a href="https://react.dev/reference/react-dom/client/hydrateRoot">React docs — hydrateRoot</a>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>Источники</h2>
+      <ul>
+        <li><a href="https://react.dev/learn/render-and-commit">React docs — Render and Commit</a></li>
+        <li><a href="https://react.dev/reference/react-dom/client/createRoot">React docs — createRoot</a></li>
+        <li><a href="https://react.dev/reference/rules/components-and-hooks-must-be-pure">React docs — Components and Hooks must be pure</a></li>
+        <li><a href="https://react.dev/learn/keeping-components-pure">React docs — Keeping Components Pure</a></li>
+        <li><a href="https://react.dev/reference/react/useLayoutEffect">React docs — useLayoutEffect</a></li>
+        <li><a href="https://react.dev/reference/react/useEffect">React docs — useEffect</a></li>
+        <li><a href="https://react.dev/reference/dev-tools/react-performance-tracks">React docs — React Performance tracks</a></li>
+        <li><a href="https://react.dev/reference/react/StrictMode">React docs — StrictMode</a></li>
+        <li><a href="https://react.dev/reference/react-dom/client/hydrateRoot">React docs — hydrateRoot</a></li>
+        <li><a href="https://di-not.github.io/Browser/style-layout-paint-composite.html">Внутренняя статья — Style → Layout → Paint → Composite</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
