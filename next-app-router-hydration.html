@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Next.js App Router: гидратация Client Components</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>Next.js App Router: гидратация Client Components</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко</h2>
+      <p>Гидратация — это этап, на котором React связывает Client Components с уже существующим HTML, полученным от сервера, и подключает обработчики событий. До гидратации пользователь уже может видеть серверный HTML, но интерактивная React-логика Client Components ещё не обязана работать.</p>
+      <p>В App Router начальная загрузка устроена слоями:</p>
+      <pre>Server HTML
+→ быстрый неинтерактивный предварительный результат
+
+RSC payload
+→ описание результата Server Components и мест Client Components
+
+Client JavaScript
+→ код Client Components и клиентской среды
+
+Hydration Client Components
+→ React связывает Client Components с существующим DOM
+→ обработчики событий подключены
+→ Client Components interactive</pre>
+      <p>Server Components могут быть видимы как HTML, но сами не гидрируются. Гидратация относится к Client Components: именно они имеют клиентский JavaScript, состояние, эффекты, обработчики событий и доступ к API браузера.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Место гидратации в ветке Next.js App Router</h2>
+      <p>Гидратация начинается после того, как у браузера уже есть несколько вещей:</p>
+      <pre>серверный HTML
++ RSC payload
++ загруженный и запущенный клиентский JavaScript
++ понятные границы Client Components</pre>
+      <p>До этого момента браузер уже мог разобрать HTML, построить DOM, показать серверный HTML, загрузить клиентские JavaScript-фрагменты, запустить клиентский bootstrap Next.js / React и использовать RSC payload для согласования Server и Client деревьев. Но всё это ещё не равно гидратации.</p>
+      <p>Гидратация — более узкий этап: React берёт существующий DOM и связывает его с Client Components.</p>
+    </section>
+
+    <section>
+      <h2>2. Что такое гидратация</h2>
+      <p>Гидратация — процесс React, в котором серверный статический HTML становится интерактивным. Next.js определяет её как прикрепление обработчиков событий к DOM. React <code>hydrateRoot</code> описывает это как “attach” React к существующему HTML, который уже был создан серверным React-rendering.</p>
+      <p>Проще:</p>
+      <pre>HTML уже есть в DOM
+→ React не создаёт этот DOM с нуля
+→ React сопоставляет его с Client Components
+→ React подключает обработчики событий
+→ UI становится интерактивным</pre>
+      <p>Пример:</p>
+      <pre><code>"use client";
+
+export function LikeButton({ likes }: { likes: number }) {
+  return &lt;button onClick={() =&gt; console.log("liked")}&gt;{likes} likes&lt;/button&gt;;
+}</code></pre>
+      <p>На сервере Next.js может подготовить HTML-предпросмотр:</p>
+      <pre><code>&lt;button&gt;10 likes&lt;/button&gt;</code></pre>
+      <p>Пользователь может увидеть кнопку до того, как React подключил к ней <code>onClick</code>. После гидратации React связывает Client Component <code>LikeButton</code> с существующей кнопкой в DOM, и React-обработчик события становится рабочим.</p>
+    </section>
+
+    <section>
+      <h2>3. Почему гидратация вообще нужна</h2>
+      <p>Без гидратации серверный HTML остаётся только HTML. Он может быть полезным: его можно показать пользователю, браузер может применить CSS, поисковый робот может прочитать текст, пользователь может видеть структуру страницы. Но React-логика Client Components ещё не подключена.</p>
+      <p>Client Component нужен для того, что должно работать в браузере:</p>
+      <ul>
+        <li>состояние через <code>useState</code>;</li>
+        <li>обработчики событий вроде <code>onClick</code>, <code>onChange</code>, <code>onSubmit</code>;</li>
+        <li>эффекты через <code>useEffect</code>;</li>
+        <li>API браузера вроде <code>window</code>, <code>localStorage</code>, <code>navigator</code>;</li>
+        <li>пользовательские хуки, которые зависят от клиентской среды.</li>
+      </ul>
+      <p>Гидратация нужна, чтобы эта логика стала связана с HTML, который уже пришёл с сервера.</p>
+      <p>Важно: нативное поведение браузера и React-интерактивность — не одно и то же. Например, обычная ссылка <code>&lt;a href="/about"&gt;</code> может работать как стандартная навигация браузера ещё до React-гидратации. Но React-обработчик <code>onClick</code>, состояние компонента, клиентский роутинг Next.js и логика Client Component требуют клиентского JavaScript и гидратации соответствующей части.</p>
+    </section>
+
+    <section>
+      <h2>4. Что именно гидрируется</h2>
+      <p>В App Router гидрируются Client Components, а не Server Components.</p>
+      <p>Server Component:</p>
+      <pre><code>// app/page.tsx
+import LikeButton from "./like-button";
+
+export default async function Page() {
+  const post = await getPost();
+
+  return (
+    &lt;article&gt;
+      &lt;h1&gt;{post.title}&lt;/h1&gt;
+      &lt;p&gt;{post.text}&lt;/p&gt;
+      &lt;LikeButton likes={post.likes} /&gt;
+    &lt;/article&gt;
+  );
+}</code></pre>
+      <p>Client Component:</p>
+      <pre><code>// app/like-button.tsx
+"use client";
+
+import { useState } from "react";
+
+export default function LikeButton({ likes }: { likes: number }) {
+  const [count, setCount] = useState(likes);
+
+  return &lt;button onClick={() =&gt; setCount(count + 1)}&gt;{count} likes&lt;/button&gt;;
+}</code></pre>
+      <p>В этом примере:</p>
+      <pre>&lt;h1&gt; и &lt;p&gt;
+→ результат Server Component
+→ видимы как HTML
+→ сами не гидрируются как Client Components
+
+&lt;LikeButton /&gt;
+→ граница Client Component
+→ требует client JavaScript
+→ проходит гидратацию
+→ получает рабочий onClick и state</pre>
+      <p>Server Component уже выполнился на сервере. Его задача — получить данные, сформировать результат, попасть в HTML и RSC payload. Он не становится браузерным компонентом с состоянием и обработчиками событий.</p>
+      <p>Client Component может иметь серверный HTML-предпросмотр при начальной загрузке, но его интерактивность появляется после гидратации.</p>
+    </section>
+
+    <section>
+      <h2>5. Что происходит во время гидратации</h2>
+      <p>Во время гидратации React делает несколько связанных вещей.</p>
+      <p>Сначала React берёт уже существующий DOM. Этот DOM появился из серверного HTML, который Next.js отдал браузеру.</p>
+      <p>Затем React строит клиентское представление для Client Components. Для этого уже должен быть доступен клиентский JavaScript: модули Client Components, их зависимости и клиентская среда Next.js / React.</p>
+      <p>После этого React сопоставляет ожидаемый результат Client Component с тем HTML, который уже существует в DOM. Если серверный HTML и первый клиентский результат совпадают, React может “прикрепиться” к существующим узлам вместо того, чтобы пересоздавать DOM с нуля.</p>
+      <p>Затем React подключает обработчики событий и начинает управлять соответствующей частью DOM.</p>
+      <p>Упрощённо:</p>
+      <pre>DOM уже содержит &lt;button&gt;10 likes&lt;/button&gt;
+
+React знает:
+- здесь Client Component LikeButton
+- props: { likes: 10 }
+- модуль LikeButton уже доступен
+
+Hydration:
+- сопоставить Client Component с DOM
+- сохранить существующий DOM
+- подключить обработчики событий
+- разрешить дальнейшие state updates</pre>
+      <p>После этого пользовательский клик по кнопке обрабатывается React-логикой.</p>
+    </section>
+
+    <section>
+      <h2>6. Client Components подключили event handlers</h2>
+      <p>После гидратации Client Components получают рабочие обработчики событий.</p>
+      <p>В JSX обработчик события выглядит как prop:</p>
+      <pre><code>&lt;button onClick={() =&gt; setCount(count + 1)}&gt;{count}&lt;/button&gt;</code></pre>
+      <p>В серверном HTML нет “React-обработчика” в таком виде. Сервер может отдать HTML кнопки, но функция <code>() =&gt; setCount(count + 1)</code> не является частью HTML-документа. Эта функция находится в клиентском JavaScript.</p>
+      <p>Во время гидратации React связывает эту функцию с DOM-событием. Поэтому после гидратации:</p>
+      <pre>пользователь кликает по кнопке
+→ браузер создаёт DOM event
+→ React получает событие
+→ React вызывает onClick
+→ setState запускает обновление Client Component
+→ React обновляет UI</pre>
+      <p>До гидратации пользователь мог видеть кнопку, но React-обработчик ещё не был подключён.</p>
+    </section>
+
+    <section>
+      <h2>7. Client Components interactive</h2>
+      <p><code>Client Components interactive</code> означает, что клиентские части приложения готовы реагировать на пользовательские действия через React.</p>
+      <p>Интерактивность может включать:</p>
+      <ul>
+        <li>клики;</li>
+        <li>ввод в поля формы;</li>
+        <li>отправку формы;</li>
+        <li>раскрытие модального окна;</li>
+        <li>изменение состояния компонента;</li>
+        <li>чтение <code>window</code>, <code>localStorage</code>, <code>navigator</code>;</li>
+        <li>запуск эффектов;</li>
+        <li>клиентскую навигацию.</li>
+      </ul>
+      <p>Важно: интерактивность не обязательно появляется сразу у всей страницы как единый глобальный момент. В современных React/Next приложениях разные части могут становиться интерактивными независимо, особенно когда используются потоковая передача HTML и границы Suspense.</p>
+      <p>Поэтому точнее говорить не “страница гидратирована вся сразу”, а:</p>
+      <pre>конкретная Client Component boundary прошла гидратацию
+→ её обработчики событий подключены
+→ эта часть UI интерактивна</pre>
+    </section>
+
+    <section>
+      <h2>8. Selective hydration</h2>
+      <p>Selective hydration — избирательная гидратация. Это механизм, при котором React может гидратировать части страницы независимо, а не обязательно одним большим блокирующим проходом по всей странице.</p>
+      <p>Next.js Streaming guide связывает selective hydration с Suspense boundaries: каждая граница Suspense может быть единицей гидратации. Без таких границ React гидратирует страницу одним блокирующим проходом; с ними работа разбивается на меньшие задачи, которые могут уступать управление браузеру.</p>
+      <p>Это важно для производительности. Если страница большая, монолитная гидратация может надолго занять главный поток браузера. Если работа разбита по границам, браузер может быстрее реагировать на действия пользователя, а React может приоритизировать ту часть, с которой пользователь взаимодействует.</p>
+      <p>Упрощённо:</p>
+      <pre>Страница без полезных границ
+→ большая гидратация одним проходом
+
+Страница с Suspense boundaries
+→ несколько меньших единиц гидратации
+→ React может приоритизировать важные части</pre>
+      <p>Selective hydration не меняет определение гидратации. Это всё ещё прикрепление React-логики к существующему DOM. Меняется способ организации работы: не всё обязательно должно гидратироваться как один монолит.</p>
+    </section>
+
+    <section>
+      <h2>9. Гидратация и Suspense</h2>
+      <p><code>Suspense</code> позволяет показывать временный UI, пока дочерний контент ещё не готов. В Next.js App Router он важен не только для визуального состояния загрузки, но и для разбиения работы: потоковая передача HTML и selective hydration интегрированы с границами Suspense.</p>
+      <p>В рамках гидратации нужно понимать две роли Suspense.</p>
+      <p>Первая роль — потоковый HTML. Граница Suspense помогает серверу отправить готовые части раньше и позже дослать содержимое, которое ожидало данные.</p>
+      <p>Вторая роль — единица гидратации. Граница Suspense помогает React не воспринимать всю страницу как один неделимый кусок работы.</p>
+      <p>Практический вывод: если интерактивная часть находится внутри отдельной границы, React получает больше возможностей гидратировать её независимо и приоритизировать работу, связанную с пользовательским взаимодействием.</p>
+    </section>
+
+    <section>
+      <h2>10. Гидратация и <code>useEffect</code></h2>
+      <p><code>useEffect</code> — это не механизм гидратации. Это хук React для синхронизации компонента с внешней системой: браузерным API, подпиской, таймером, сетью и другими side effects.</p>
+      <p>В теме гидратации <code>useEffect</code> часто появляется как способ избежать mismatch. Если часть UI должна отличаться только на клиенте, её не стоит менять прямо в render logic через <code>typeof window !== 'undefined'</code>, потому что первый клиентский render должен совпасть с серверным HTML. Вместо этого можно сначала отрендерить одинаковый результат, а уже на клиенте через <code>useEffect</code> переключить состояние.</p>
+      <p>Пример:</p>
+      <pre><code>"use client";
+
+import { useEffect, useState } from "react";
+
+export function ClientOnlyLabel() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() =&gt; {
+    setMounted(true);
+  }, []);
+
+  return &lt;p&gt;{mounted ? "Client only value" : "Server-safe value"}&lt;/p&gt;;
+}</code></pre>
+      <p>Здесь первый результат должен быть безопасным для серверного HTML и первого клиентского render. После этого effect может изменить состояние уже на клиенте.</p>
+      <p>Важно: такой подход может сделать UI “двухфазным”: сначала пользователь видит серверно-безопасную версию, затем клиентскую. Это нормально для некоторых задач, но не нужно использовать этот приём без необходимости.</p>
+    </section>
+
+    <section>
+      <h2>11. Hydration mismatch</h2>
+      <p>Hydration mismatch — ситуация, когда HTML, созданный сервером, не совпадает с тем, что React получает при первом клиентском render во время гидратации.</p>
+      <p>React ожидает, что первый клиентский результат совпадёт с серверным результатом. Это важно: пользователь уже смотрит на серверный HTML до загрузки JavaScript, и внезапная замена содержимого ломает ощущение быстрой загрузки. Кроме того, mismatch может привести к неправильному поведению, включая риск привязки обработчиков событий не к тем элементам.</p>
+      <p>Пример проблемы:</p>
+      <pre><code>"use client";
+
+export function TimeLabel() {
+  return &lt;p&gt;{new Date().toLocaleTimeString()}&lt;/p&gt;;
+}</code></pre>
+      <p>Сервер отрендерил одно время, клиент во время гидратации получил другое. Результат может не совпасть.</p>
+      <p>Другой пример:</p>
+      <pre><code>"use client";
+
+export function WidthLabel() {
+  if (typeof window !== "undefined") {
+    return &lt;p&gt;Client width: {window.innerWidth}&lt;/p&gt;;
+  }
+
+  return &lt;p&gt;Server render&lt;/p&gt;;
+}</code></pre>
+      <p>Серверный HTML и первый клиентский render могут отличаться. Такую логику лучше переносить в <code>useEffect</code> или проектировать так, чтобы первый серверный и первый клиентский результат совпадали.</p>
+    </section>
+
+    <section>
+      <h2>12. Частые причины hydration mismatch</h2>
+      <p>Частые причины:</p>
+      <ul>
+        <li>неправильная вложенность HTML-тегов;</li>
+        <li>интерактивный контент внутри интерактивного контента, например <code>&lt;button&gt;</code> внутри <code>&lt;button&gt;</code>;</li>
+        <li>проверки <code>typeof window !== 'undefined'</code> прямо в render logic;</li>
+        <li>использование <code>window</code>, <code>localStorage</code>, <code>matchMedia</code> и других browser-only API во время render;</li>
+        <li>значения, зависящие от времени: <code>Date</code>, таймзона, локаль, текущее время;</li>
+        <li>случайные значения вроде <code>Math.random()</code> во время render;</li>
+        <li>различие данных на сервере и клиенте;</li>
+        <li>расширения браузера, которые меняют HTML;</li>
+        <li>CDN или Edge-настройки, которые модифицируют HTML-ответ;</li>
+        <li>некорректная настройка CSS-in-JS.</li>
+      </ul>
+      <p>Главное правило:</p>
+      <pre>server render output
+должен совпасть с initial client render output</pre>
+      <p>Если первое клиентское отображение отличается от серверного HTML, React получает mismatch.</p>
+    </section>
+
+    <section>
+      <h2>13. Как исправлять mismatch</h2>
+      <p>Базовая стратегия — сделать первый серверный render и первый клиентский render одинаковыми.</p>
+      <p>Если значение должно появиться только на клиенте, используйте состояние и <code>useEffect</code>:</p>
+      <pre><code>"use client";
+
+import { useEffect, useState } from "react";
+
+export function BrowserValue() {
+  const [value, setValue] = useState&lt;string | null&gt;(null);
+
+  useEffect(() =&gt; {
+    setValue(window.localStorage.getItem("key"));
+  }, []);
+
+  return &lt;p&gt;{value ?? "Loading value..."}&lt;/p&gt;;
+}</code></pre>
+      <p>Если компонент вообще не должен рендериться на сервере, в Next.js можно использовать <code>dynamic</code> с <code>ssr: false</code>:</p>
+      <pre><code>import dynamic from "next/dynamic";
+
+const NoSSR = dynamic(() =&gt; import("./client-only-widget"), {
+  ssr: false,
+});
+
+export default function Page() {
+  return &lt;NoSSR /&gt;;
+}</code></pre>
+      <p>Если различие неизбежно и ограничено текстом, можно использовать <code>suppressHydrationWarning</code>, но это escape hatch. Его не нужно превращать в обычный способ “чинить” несоответствия.</p>
+      <pre><code>&lt;time suppressHydrationWarning&gt;{new Date().toISOString()}&lt;/time&gt;</code></pre>
+      <p>Лучший вариант почти всегда — спроектировать компонент так, чтобы начальный HTML и первый клиентский render совпадали.</p>
+    </section>
+
+    <section>
+      <h2>14. Гидратация и повторный render</h2>
+      <p>Гидратация не равна обычному первому render в React SPA.</p>
+      <p>В обычной React SPA без server-rendered HTML часто используется <code>createRoot(root).render(&lt;App /&gt;)</code>. React сам создаёт DOM внутри root container.</p>
+      <p>При гидратации используется уже существующий DOM. React не должен создавать всё с нуля. Он должен привязаться к HTML, который уже был создан на сервере.</p>
+      <p>Сравнение:</p>
+      <pre>React SPA initial render
+→ root пустой или почти пустой
+→ React создаёт DOM
+
+Hydration
+→ DOM уже содержит server HTML
+→ React сопоставляет DOM с компонентами
+→ React подключает логику</pre>
+      <p>Поэтому для server-rendered HTML используется не <code>createRoot</code>, а <code>hydrateRoot</code> на уровне React. В Next.js этот вызов скрыт внутри фреймворка.</p>
+    </section>
+
+    <section>
+      <h2>15. Гидратация и обновления после неё</h2>
+      <p>После гидратации React начинает управлять соответствующей частью DOM. Дальше Client Components работают как обычные клиентские React-компоненты.</p>
+      <p>Например:</p>
+      <pre><code>"use client";
+
+import { useState } from "react";
+
+export function Counter({ initialCount }: { initialCount: number }) {
+  const [count, setCount] = useState(initialCount);
+
+  return &lt;button onClick={() =&gt; setCount(count + 1)}&gt;{count}&lt;/button&gt;;
+}</code></pre>
+      <p>До гидратации пользователь может видеть кнопку с <code>initialCount</code>. После гидратации к ней подключается обработчик события. После клика <code>setCount</code> запускает обычное React-обновление: render phase, commit phase, DOM update и browser paint.</p>
+      <p>То есть:</p>
+      <pre>гидратация
+→ подключила существующий DOM к React
+
+последующие updates
+→ React уже обновляет UI как клиентское приложение</pre>
+    </section>
+
+    <section>
+      <h2>16. Гидратация и последующие навигации</h2>
+      <p>Гидратация особенно важна для initial load: когда пользователь открывает страницу напрямую, обновляет страницу или получает server-rendered HTML.</p>
+      <p>На последующих клиентских навигациях в App Router модель меняется. Next.js может использовать RSC payload для нового маршрута, а Client Components рендерятся на клиенте без server-rendered HTML для этой новой навигации. Это уже не та же самая гидратация исходного server HTML, который пришёл при первом открытии страницы.</p>
+      <p>Упрощённо:</p>
+      <pre>Первичная загрузка / refresh
+→ серверный HTML уже есть
+→ нужна гидратация Client Components
+
+Клиентская навигация внутри приложения
+→ Next.js получает RSC payload
+→ Client Components работают на клиенте
+→ новая часть UI не обязана проходить ту же гидратацию server HTML</pre>
+      <p>Поэтому термин “гидратация” чаще всего относится к первому превращению server-rendered HTML в интерактивное приложение.</p>
+    </section>
+
+    <section>
+      <h2>17. Как понять, что часть UI ещё не гидратирована</h2>
+      <p>Пользователь может видеть элемент, но React-логика ещё не работает.</p>
+      <p>Признаки:</p>
+      <ul>
+        <li>элемент виден, но <code>onClick</code> не реагирует как ожидается;</li>
+        <li>кнопка выглядит правильно, но состояние не меняется;</li>
+        <li>интерактивный виджет не отвечает на ввод;</li>
+        <li>клиентская навигация ещё не перехватывает действие;</li>
+        <li>DevTools показывает, что JavaScript ещё грузится или main thread занят.</li>
+      </ul>
+      <p>Но важно не путать это с ошибками приложения. Если обработчик не работает после полной загрузки, это может быть уже не “ещё не гидратировано”, а bug в коде, ошибка JavaScript, mismatch или неправильная граница Client Component.</p>
+    </section>
+
+    <section>
+      <h2>18. Что важно не перепутать</h2>
+      <pre>Hydration ≠ загрузка JavaScript</pre>
+      <p>Загрузка JavaScript означает, что файл получен браузером. Гидратация означает, что React связал Client Component с существующим DOM.</p>
+      <pre>Hydration ≠ выполнение JavaScript-файла</pre>
+      <p>Модуль может быть выполнен, но React ещё должен сопоставить компонент с DOM и подключить обработчики событий.</p>
+      <pre>Hydration ≠ RSC payload</pre>
+      <p>RSC payload описывает Server Components tree и места Client Components. Гидратация применяет клиентскую React-логику к существующему DOM.</p>
+      <pre>Hydration ≠ Server Component render</pre>
+      <p>Server Components выполняются на сервере. Они могут быть видимы как HTML, но сами не гидрируются.</p>
+      <pre>Hydration ≠ createRoot render</pre>
+      <p><code>createRoot(...).render(...)</code> создаёт/обновляет DOM в клиентском React-приложении. <code>hydrateRoot(...)</code> прикрепляет React к уже существующему server HTML.</p>
+      <pre>Hydration mismatch ≠ обычная ошибка CSS</pre>
+      <p>Mismatch связан с несовпадением server-rendered HTML и первого client render.</p>
+      <pre>Client Components interactive ≠ вся страница полностью готова</pre>
+      <p>Интерактивной может стать конкретная клиентская граница, пока другие части ещё загружаются или ожидают работу main thread.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>Источники</h2>
+      <h3>Next.js</h3>
+      <ul>
+        <li><a href="https://nextjs.org/docs/app/glossary">Next.js Glossary — Hydration</a></li>
+        <li><a href="https://nextjs.org/docs/app/getting-started/server-and-client-components">Next.js docs — Server and Client Components</a></li>
+        <li><a href="https://nextjs.org/docs/app/guides/streaming">Next.js docs — Streaming</a></li>
+        <li><a href="https://nextjs.org/docs/messages/react-hydration-error">Next.js docs — Hydration error</a></li>
+      </ul>
+      <h3>React</h3>
+      <ul>
+        <li><a href="https://react.dev/reference/react-dom/client/hydrateRoot">React docs — hydrateRoot</a></li>
+        <li><a href="https://react.dev/reference/react/Suspense">React docs — Suspense</a></li>
+        <li><a href="https://react.dev/blog/2022/03/29/react-v18">React v18 release notes</a></li>
+        <li><a href="https://react.dev/reference/react-dom/server/renderToReadableStream">React docs — renderToReadableStream</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
