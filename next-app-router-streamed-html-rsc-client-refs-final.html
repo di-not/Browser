@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Next.js App Router: потоковый HTML, RSC payload, ссылки на клиентские компоненты и первые JavaScript-фрагменты</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>Next.js App Router: потоковый HTML, RSC payload, ссылки на клиентские компоненты и первые JavaScript-фрагменты</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко</h2>
+      <blockquote>
+        <p>В App Router начальный ответ сервера — это не только HTML. Next.js использует серверный HTML для быстрого видимого предварительного результата, RSC payload для описания результата Server Components и ссылки на JavaScript-файлы Client Components. Браузер может начать читать потоковый HTML, строить DOM и показывать части страницы до полной загрузки и гидратации клиентского JavaScript. Server Components могут быть видимы как HTML, но сами не гидрируются; гидратация нужна Client Components.</p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Что означает <code>Server/streamed HTML + RSC payload + client refs</code></h2>
+      <p>В App Router файлы <code>layout</code> и <code>page</code> по умолчанию являются Server Components. Они выполняются на сервере, могут получать данные рядом с серверным источником, использовать секреты без отправки их в браузер и уменьшать количество JavaScript, которое нужно загрузить на клиенте. Если компоненту нужны состояние, обработчики событий, API браузера или эффекты, он должен быть Client Component.</p>
+      <p>Стартовая запись:</p>
+      <pre>Server/streamed HTML + RSC payload + client refs</pre>
+      <p>означает, что серверный ответ для маршрута App Router состоит из нескольких связанных слоёв.</p>
+      <p><code>Server/streamed HTML</code> — серверный HTML, который браузер может начать читать и показывать. Он может прийти сразу целиком или постепенно, фрагментами, если часть маршрута ждёт данные или временно приостановлена.</p>
+      <p><code>RSC payload</code> — React Server Component Payload: специальное представление результата дерева Server Components. Оно нужно React и клиентской среде Next.js, чтобы позднее согласовать деревья Server и Client Components.</p>
+      <p><code>Client refs</code> — ссылки на Client Components и их JavaScript-файлы. Они указывают, где в дереве находятся границы Client Components и какой JavaScript нужен для их клиентской части.</p>
+      <p>Это не три независимых ответа. Это части одной модели: HTML даёт быстрый видимый результат, RSC payload описывает дерево React Server Components, а ссылки на клиентские компоненты связывают места Client Components с их JavaScript-фрагментами.</p>
+    </section>
+
+    <section>
+      <h2>2. Какие компоненты участвуют в этом диапазоне</h2>
+      <p>В этом участке могут встречаться несколько видов компонентов. Их нужно различать, потому что они по-разному участвуют в HTML, RSC payload, JavaScript-фрагментах и гидратации.</p>
+      <h3>Server Components</h3>
+      <p>Server Component выполняется на сервере. В App Router это поведение по умолчанию для <code>page</code>, <code>layout</code> и обычных компонентов, которые не попали в клиентское поддерево модулей.</p>
+      <pre><code>// app/page.tsx
+export default async function Page() {
+  const post = await getPost();
+
+  return (
+    &lt;main&gt;
+      &lt;h1&gt;{post.title}&lt;/h1&gt;
+      &lt;p&gt;{post.description}&lt;/p&gt;
+    &lt;/main&gt;
+  );
+}</code></pre>
+      <p>Такой компонент может читать данные на сервере и вернуть UI. Его результат может попасть в HTML и RSC payload. Его компонентный код не нужен браузеру для интерактивности, если сам компонент не является Client Component.</p>
+      <p>Server Component подходит для серверного получения данных, работы с ключами API и другими секретами, уменьшения клиентского JavaScript и постепенной потоковой отправки содержимого в браузер.</p>
+      <p>Server Component не подходит для состояния, обработчиков событий, эффектов и API, которые существуют только в браузере. Эти возможности относятся к Client Components.</p>
+
+      <h3>Client Components</h3>
+      <p>Client Component нужен там, где UI должен быть интерактивным в браузере.</p>
+      <p>Файл Client Component начинается с директивы:</p>
+      <pre><code>'use client';</code></pre>
+      <pre><code>// app/like-button.tsx
+'use client';
+
+import { useState } from 'react';
+
+export default function LikeButton({ likes }: { likes: number }) {
+  const [count, setCount] = useState(likes);
+
+  return (
+    &lt;button onClick={() =&gt; setCount(count + 1)}&gt;
+      {count} likes
+    &lt;/button&gt;
+  );
+}</code></pre>
+      <p>Этот компонент использует <code>useState</code> и <code>onClick</code>, поэтому он должен быть Client Component. Для него нужен JavaScript в браузере. При начальной загрузке он может участвовать в серверном HTML-предпросмотре, но его интерактивность появится только после загрузки и гидратации соответствующего клиентского JavaScript.</p>
+
+      <h3>Клиентское поддерево модулей</h3>
+      <p><code>'use client'</code> создаёт границу не просто в визуальном дереве JSX, а в дереве зависимостей модулей. Если файл помечен <code>'use client'</code>, он и его транзитивные зависимости становятся частью клиентского поддерева модулей.</p>
+      <p>Это значит:</p>
+      <pre><code>// client-panel.tsx
+'use client';
+
+import Button from './button';
+import formatDate from './format-date';</code></pre>
+      <p><code>Button</code> и <code>formatDate</code> могут не иметь собственной директивы <code>'use client'</code>, но если они импортированы из модуля с <code>'use client'</code>, они попадут в клиентское поддерево и будут выполняться на клиенте.</p>
+      <p>При этом один и тот же компонентный модуль без директивы может использоваться по-разному: если он импортирован из серверного кода, его использование может быть Server Component; если он импортирован из клиентского поддерева, его использование может стать клиентской частью. Поэтому нельзя определять тип компонента только по тому, как он выглядит в JSX.</p>
+
+      <h3><code>loading.js</code> и запасной UI</h3>
+      <p><code>loading.js</code> — специальный файл App Router для интерфейса загрузки сегмента маршрута. По умолчанию такой компонент является Server Component, но может быть Client Component, если внутри используется <code>'use client'</code>.</p>
+      <pre><code>// app/dashboard/loading.tsx
+export default function Loading() {
+  return &lt;p&gt;Loading dashboard...&lt;/p&gt;;
+}</code></pre>
+      <p><code>loading.js</code> автоматически создаёт границу Suspense для <code>page</code> и дочерних сегментов ниже текущего сегмента. Пока содержимое сегмента передаётся потоково, пользователь может видеть запасной UI. Когда содержимое готово, оно автоматически заменяет запасной UI.</p>
+      <p>Для текущей статьи важно не уходить глубоко в Suspense как React-тему, а зафиксировать его роль в HTML-потоке: запасной UI может быть частью раннего HTML, который браузер показывает до готовности более позднего сегмента.</p>
+
+      <h3>Части маршрута</h3>
+      <p>App Router разбивает маршрут на сегменты. В создании результата участвуют <code>layout</code>, <code>page</code>, вложенные <code>layout</code>, <code>loading.js</code> и другие специальные файлы. В текущем диапазоне важнее всего:</p>
+      <ul>
+        <li><code>layout</code> может формировать общий каркас страницы;</li>
+        <li><code>page</code> формирует основное содержимое сегмента;</li>
+        <li><code>loading.js</code> даёт запасной UI для сегмента;</li>
+        <li>вложенные сегменты могут передаваться потоково отдельно.</li>
+      </ul>
+      <p>Из-за этого HTML не обязан ждать, пока вся страница будет полностью готова. Готовые части могут отправляться раньше, а приостановленные части — позже.</p>
+    </section>
+
+    <section>
+      <h2>3. Как выглядит HTML, который приходит в браузер</h2>
+      <p>Точный HTML, который генерирует Next.js, является внутренней деталью реализации: он может меняться между версиями, режимами сборки и настройками.</p>
+      <p>В потоковом ответе могут быть такие слои:</p>
+      <ol>
+        <li>Каркас документа: <code>&lt;!doctype html&gt;</code>, <code>&lt;html&gt;</code>, <code>&lt;head&gt;</code>, <code>&lt;body&gt;</code>.</li>
+        <li>Метаданные и подсказки для загрузки ресурсов: <code>title</code>, <code>meta</code>, ссылки на таблицы стилей, предварительную загрузку и JavaScript.</li>
+        <li>Статический каркас маршрута: общий <code>layout</code>, навигация, постоянные части страницы.</li>
+        <li>Запасной HTML: интерфейс загрузки или запасной UI Suspense для сегмента, который ещё не готов.</li>
+        <li>HTML для готовых Server Components и сегментов маршрута.</li>
+        <li>Данные и служебные инструкции, связанные с RSC payload, которые нужны React и клиентской среде Next.js для дальнейшего согласования дерева.</li>
+        <li>Ссылки на клиентские JavaScript-фрагменты для Client Components.</li>
+      </ol>
+      <p>Упрощённый пример того, что пользователь может получить на раннем этапе:</p>
+      <pre><code>&lt;!doctype html&gt;
+&lt;html lang="en"&gt;
+  &lt;head&gt;
+    &lt;title&gt;Dashboard&lt;/title&gt;
+    &lt;link rel="stylesheet" href="/_next/static/css/app.css"&gt;
+    &lt;script src="/_next/static/chunks/main.js" defer&gt;&lt;/script&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;nav&gt;Dashboard&lt;/nav&gt;
+    &lt;main&gt;
+      &lt;p&gt;Loading feed...&lt;/p&gt;
+    &lt;/main&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</code></pre>
+      <p>Этот пример не описывает реальный внутренний формат Next.js. Он показывает идею: в раннем HTML уже может быть каркас документа, стили, ссылки на JavaScript-фрагменты, общий <code>layout</code> и запасной UI.</p>
+      <p>Позже поток может принести HTML для сегмента, который завершил асинхронную работу:</p>
+      <pre><code>&lt;article&gt;
+  &lt;h2&gt;Latest posts&lt;/h2&gt;
+  &lt;p&gt;Post content...&lt;/p&gt;
+&lt;/article&gt;</code></pre>
+      <p>В реальном потоковом ответе заменой запасного UI на готовое содержимое управляют React и клиентская среда Next.js через служебные инструкции.</p>
+    </section>
+
+    <section>
+      <h2>4. Потоковый HTML</h2>
+      <p>Потоковый HTML — HTML, который отправляется не одним блоком после полной готовности всего маршрута, а частями по мере готовности.</p>
+      <p>В традиционном варианте сервер мог бы сначала дождаться всех данных, собрать всю HTML-страницу и только потом отправить ответ. Потоковая передача меняет это поведение: сервер может отправить статический каркас и запасной UI раньше, а затем досылать готовые сегменты.</p>
+      <p>Упрощённая логика:</p>
+      <p>Сначала сервер может отдать <code>layout</code> и запасной UI:</p>
+      <pre><code>// app/dashboard/loading.tsx
+export default function Loading() {
+  return &lt;p&gt;Loading feed...&lt;/p&gt;;
+}</code></pre>
+      <p>Пользователь видит:</p>
+      <pre><code>&lt;nav&gt;Dashboard&lt;/nav&gt;
+&lt;main&gt;
+  &lt;p&gt;Loading feed...&lt;/p&gt;
+&lt;/main&gt;</code></pre>
+      <p>Когда данные для ленты готовы, сервер потоково отправляет содержимое:</p>
+      <pre><code>&lt;section&gt;
+  &lt;h2&gt;Feed&lt;/h2&gt;
+  &lt;article&gt;...&lt;/article&gt;
+&lt;/section&gt;</code></pre>
+      <p>После этого запасной UI заменяется готовым содержимым. Документация Next.js по потоковой передаче описывает, что запасной UI отправляется со статическим каркасом, а когда <code>Promise</code> завершается, React потоково отправляет готовый HTML на страницу.</p>
+      <p>Для диаграммы это соответствует идее:</p>
+      <pre>HTML Parser читает server/streamed HTML
+→ DOM создаётся по мере прихода HTML chunks
+→ можно показать server HTML / stream segment</pre>
+      <p><code>HTML chunk</code> — фрагмент ответа, который браузер получил до полного окончания потока. Фрагмент не обязан быть самостоятельным полноценным HTML-документом. Это может быть часть <code>&lt;body&gt;</code>, служебные инструкции, данные, связанные с RSC payload, или содержимое для сегмента. Браузер и клиентская среда React/Next.js совместно доводят эти части до итогового DOM.</p>
+    </section>
+
+    <section>
+      <h2>5. Как потоковый HTML связан с гидратацией</h2>
+      <p>Потоковый HTML и гидратация связаны, но решают разные задачи.</p>
+      <p>Потоковый HTML отвечает за ранний показ результата. Сервер отправляет HTML частями, браузер читает эти части, постепенно строит DOM и может показывать пользователю каркас страницы, запасной UI или готовые сегменты маршрута до того, как весь JavaScript для Client Components загружен и выполнен.</p>
+      <p>Гидратация отвечает за интерактивность. После того как клиентский JavaScript загружен и выполнен, React может привязать обработчики событий к уже существующему DOM. В документации Next.js гидратация описывается именно как процесс прикрепления обработчиков событий к DOM, чтобы статический HTML стал интерактивным.</p>
+      <p>В App Router это особенно важно, потому что начальная загрузка разделена на несколько слоёв. HTML нужен для быстрого неинтерактивного предварительного результата. RSC payload нужен для согласования деревьев Server и Client Components. JavaScript нужен для гидратации Client Components и интерактивности.</p>
+      <p>Поэтому потоковый HTML можно считать подготовкой видимого DOM, а не самой гидратацией. Он даёт браузеру HTML, который можно показать. Гидратация приходит позже и подключает клиентскую логику только там, где есть Client Component.</p>
+      <p>Из этого следует важное правило для диаграммы: <code>Server HTML виден</code> не означает, что <code>Client Components interactive</code>. Видимость HTML может наступить раньше, чем гидратация клиентских частей.</p>
+    </section>
+
+    <section>
+      <h2>6. RSC payload</h2>
+      <p><code>RSC payload</code> — React Server Component Payload.</p>
+      <p>Он не равен HTML. HTML нужен, чтобы пользователь быстро увидел предварительный результат маршрута. RSC payload нужен React и клиентской среде Next.js, чтобы понимать результат дерева Server Components и места, где должны быть Client Components.</p>
+      <p>В RSC payload входят:</p>
+      <ul>
+        <li>результат Server Components;</li>
+        <li>заполнители для мест, где должны быть Client Components;</li>
+        <li>ссылки на JavaScript-файлы Client Components;</li>
+        <li>свойства, переданные от Server Component к Client Component.</li>
+      </ul>
+      <p>Пример структуры приложения:</p>
+      <pre><code>// app/post/page.tsx — Server Component
+import LikeButton from './like-button';
+
+export default async function Page() {
+  const post = await getPost();
+
+  return (
+    &lt;article&gt;
+      &lt;h1&gt;{post.title}&lt;/h1&gt;
+      &lt;p&gt;{post.text}&lt;/p&gt;
+      &lt;LikeButton likes={post.likes} /&gt;
+    &lt;/article&gt;
+  );
+}</code></pre>
+      <pre><code>// app/post/like-button.tsx — Client Component
+'use client';
+
+import { useState } from 'react';
+
+export default function LikeButton({ likes }: { likes: number }) {
+  const [count, setCount] = useState(likes);
+  return &lt;button onClick={() =&gt; setCount(count + 1)}&gt;{count}&lt;/button&gt;;
+}</code></pre>
+      <p>Для такой страницы RSC payload на уровне смысла должен описать:</p>
+      <ul>
+        <li>серверную часть <code>article</code>, <code>h1</code>, <code>p</code>;</li>
+        <li>место, где должен быть <code>LikeButton</code>;</li>
+        <li>ссылку на JavaScript, который нужен для <code>LikeButton</code>;</li>
+        <li>свойство <code>likes</code>, которое передаётся в <code>LikeButton</code>.</li>
+      </ul>
+      <p>RSC payload не выполняется как обычный JavaScript-компонент. Это данные для клиентской работы React/Next.js. JavaScript для Client Components загружается отдельно как клиентские фрагменты.</p>
+    </section>
+
+    <section>
+      <h2>7. Client refs: ссылки на клиентские компоненты</h2>
+      <p><code>Client refs</code> — ссылки на Client Components и их JavaScript-файлы. Они появляются в RSC payload, потому что дерево Server Components может содержать границы Client Components.</p>
+      <p>Ссылка на клиентский компонент отвечает на вопрос:</p>
+      <blockquote>
+        <p>В каком месте общего дерева должен быть Client Component и какой JavaScript нужен, чтобы эта клиентская часть могла выполниться и пройти гидратацию?</p>
+      </blockquote>
+      <p>Пример:</p>
+      <pre><code>// Server Component
+export default function Page() {
+  return (
+    &lt;main&gt;
+      &lt;h1&gt;Product&lt;/h1&gt;
+      &lt;AddToCartButton productId="p1" /&gt;
+    &lt;/main&gt;
+  );
+}</code></pre>
+      <pre><code>// Client Component
+'use client';
+
+export function AddToCartButton({ productId }: { productId: string }) {
+  return &lt;button onClick={() =&gt; addToCart(productId)}&gt;Add to cart&lt;/button&gt;;
+}</code></pre>
+      <p><code>&lt;h1&gt;Product&lt;/h1&gt;</code> может быть частью результата Server Component. <code>AddToCartButton</code> требует клиентский JavaScript, потому что у него есть обработчик события. Значит, для этой границы нужны ссылки на клиентский компонент и клиентские JavaScript-фрагменты.</p>
+      <p>Важное ограничение: свойства, которые Server Component передаёт Client Component, должны быть сериализуемыми React. Это связано с тем, что данные проходят через границу Server → Client.</p>
+    </section>
+
+    <section>
+      <h2>8. HTML Parser читает server/streamed HTML</h2>
+      <p>Когда браузер получает первые байты HTML-ответа, HTML parser начинает читать документ. Если ответ передаётся потоково, parser может работать постепенно: получил часть HTML — построил часть DOM, получил следующую часть — продолжил.</p>
+      <p>Пример логики:</p>
+      <p>Первые фрагменты могут дать документ и каркас:</p>
+      <pre><code>&lt;html&gt;
+  &lt;head&gt;
+    &lt;link rel="stylesheet" href="/_next/static/css/app.css"&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;nav&gt;Dashboard&lt;/nav&gt;
+    &lt;main&gt;
+      &lt;p&gt;Loading...&lt;/p&gt;</code></pre>
+      <p>DOM уже может содержать <code>nav</code>, <code>main</code> и запасной UI. Позже поток продолжится, и DOM будет дополнен или обновлён через потоковые инструкции.</p>
+      <p>Для браузера это всё ещё чтение HTML и построение DOM. Next.js добавляет к этому модель сегментов маршрута, RSC payload и границ Client Components, но базовая механика чтения HTML остаётся браузерной.</p>
+    </section>
+
+    <section>
+      <h2>9. DOM создаётся по мере прихода HTML chunks</h2>
+      <p>При потоковой передаче DOM может формироваться постепенно.</p>
+      <p>Ранний DOM может содержать:</p>
+      <ul>
+        <li>элементы корневого <code>layout</code>;</li>
+        <li>навигацию;</li>
+        <li>общий каркас страницы;</li>
+        <li>запасной UI для приостановленного сегмента маршрута;</li>
+        <li>часть серверного содержимого, которая уже готова;</li>
+        <li>служебные элементы <code>script</code> и <code>link</code> для среды выполнения, CSS и JavaScript-фрагментов.</li>
+      </ul>
+      <p>Поздний DOM может получить:</p>
+      <ul>
+        <li>готовое содержимое сегмента вместо запасного UI;</li>
+        <li>дополнительные элементы из вложенного маршрута;</li>
+        <li>HTML, связанный с завершившимися асинхронными Server Components.</li>
+      </ul>
+      <p>Такой подход особенно важен для ощущаемой скорости: пользователь видит не пустую страницу, а статический каркас или интерфейс загрузки, пока сервер готовит динамическое содержимое.</p>
+      <p><code>loading.js</code> специально поддерживает этот паттерн: он позволяет показать мгновенное состояние загрузки с сервера, пока содержимое сегмента маршрута передаётся потоково, а готовое содержимое автоматически заменяет запасной UI.</p>
+    </section>
+
+    <section>
+      <h2>10. Обнаружение CSS / client chunks / images / fonts</h2>
+      <p>Пока HTML parser читает потоковый HTML, браузер и клиентская среда Next.js обнаруживают ресурсы, которые нужны странице.</p>
+      <p>CSS нужен для корректного визуального отображения. Эта тема относится к браузерному блоку <code>CSS loading → CSSOM</code>, который уже разобран во внутренней статье <a href="https://di-not.github.io/Browser/css-loading-cssom-inline-definitions.html">CSS loading и CSSOM</a>.</p>
+      <p>Изображения и шрифты — обычные дополнительные ресурсы страницы. Они могут загружаться параллельно и влиять на событие <code>load</code> или визуальную стабильность, но в этой статье они не являются главной темой.</p>
+      <p>Клиентские JavaScript-фрагменты — главный объект для Next.js flow в этом диапазоне. Это JavaScript-файлы, которые нужны для Client Components и клиентской среды выполнения.</p>
+      <p>Обнаружение клиентских фрагментов может происходить на нескольких уровнях.</p>
+      <p>На браузерном уровне HTML содержит ссылки <code>script</code>, <code>link</code>, <code>preload</code> или <code>modulepreload</code>, и браузер может начать загрузку этих ресурсов.</p>
+      <p>На уровне фреймворка RSC payload и служебные манифесты Next.js связывают ссылки на Client Components с конкретными JavaScript-файлами. Эти детали не нужно рассматривать как публичный формат для ручного использования, но они объясняют, почему из дерева Server/Client Components получается набор нужных клиентских фрагментов.</p>
+      <p>Поэтому блок:</p>
+      <pre>Client Component JS refs обнаружены
+→ Client JS chunks загружаются</pre>
+      <p>лучше понимать как смысловой шаг: Next.js знает, какие Client Components нужны для маршрута, и браузер начинает получать JavaScript, необходимый для клиентской части.</p>
+    </section>
+
+    <section>
+      <h2>11. Откуда берётся клиентский bootstrap в HTML</h2>
+      <p>Серверный HTML в App Router не состоит только из разметки, которую вернули Server Components. Server Component возвращает UI, но Next.js server renderer собирает вокруг этого результата полноценный HTML-документ или HTML-поток. В этот документ Next.js добавляет ссылки на CSS, ссылки на JavaScript-фрагменты и служебные данные, которые нужны клиентской части приложения.</p>
+      <blockquote>
+        <p>Next.js формирует HTML/stream вокруг результата Server Components и вставляет туда ссылки на клиентские JavaScript-фрагменты и служебные данные. Браузер видит эти ссылки, скачивает соответствующие файлы и позже выполняет их.</p>
+      </blockquote>
+      <p>Упрощённо в HTML могут встретиться ссылки на файлы вида:</p>
+      <pre><code>&lt;link rel="stylesheet" href="/_next/static/css/...css"&gt;
+
+&lt;script src="/_next/static/chunks/webpack-....js" async&gt;&lt;/script&gt;
+&lt;script src="/_next/static/chunks/main-app-....js" async&gt;&lt;/script&gt;
+&lt;script src="/_next/static/chunks/app/layout-....js" async&gt;&lt;/script&gt;
+&lt;script src="/_next/static/chunks/app/page-....js" async&gt;&lt;/script&gt;</code></pre>
+      <p>Имена файлов здесь условные. В реальном проекте они зависят от версии Next.js, режима сборки, маршрута, сборщика и настроек. Их нельзя использовать как стабильный публичный API. Важно другое: браузер получает из HTML ссылки на JavaScript, который нужен клиентской части Next.js и Client Components.</p>
+      <p>Эти JavaScript-фрагменты можно разделить по смыслу на несколько категорий.</p>
+      <p>Первая категория — служебный код загрузки и выполнения модулей. Он помогает браузеру и сборщику понять, какие фрагменты уже загружены, какие нужны текущему маршруту, как зарегистрировать модуль и как получить экспорт Client Component.</p>
+      <p>Вторая категория — клиентская часть Next.js App Router. Она нужна, чтобы приложение могло работать в браузере: использовать данные App Router, читать RSC payload, поддерживать клиентскую навигацию, понимать текущий маршрут и подготовить React к работе с Client Components.</p>
+      <p>Третья категория — код самих Client Components и их зависимостей. Например, если в дереве есть кнопка с <code>'use client'</code>, её JavaScript должен быть доступен браузеру.</p>
+      <pre><code>'use client';
+
+export function AddToCartButton() {
+  return &lt;button onClick={() =&gt; addToCart()}&gt;Add to cart&lt;/button&gt;;
+}</code></pre>
+      <p>Когда JavaScript-файл с таким модулем загружен, это ещё не гидратация. Когда файл выполнен и модуль зарегистрирован, это тоже ещё не обязательно гидратация. Гидратация начинается тогда, когда React связывает Client Component с уже существующим DOM и подключает обработчики событий.</p>
+    </section>
+
+    <section>
+      <h2>12. Client Component JS refs обнаружены</h2>
+      <p>Когда в дереве есть граница Client Component, Next.js должен связать эту границу с JavaScript, который будет загружен на клиенте.</p>
+      <p>Граница Client Component появляется через <code>'use client'</code>.</p>
+      <pre><code>'use client';
+
+export function Counter() {
+  return &lt;button onClick={() =&gt; {}}&gt;Click&lt;/button&gt;;
+}</code></pre>
+      <p>После такой границы всё, что импортируется и напрямую используется внутри клиентского поддерева, попадает в клиентский пакет JavaScript. Поэтому не нужно ставить <code>'use client'</code> в каждом маленьком компоненте, если он уже находится внутри клиентского поддерева.</p>
+      <p>Но важно не спутать дерево модулей и дерево отображения. <code>'use client'</code> определяет границу в дереве зависимостей модулей. Поэтому компонент, переданный как <code>children</code> в Client Component, может остаться Server Component, если он не импортирован внутрь клиентского поддерева модулей.</p>
+      <p>Пример идеи:</p>
+      <pre><code>// Server Component
+import ClientShell from './client-shell';
+import ServerText from './server-text';
+
+export default function Page() {
+  return (
+    &lt;ClientShell&gt;
+      &lt;ServerText /&gt;
+    &lt;/ClientShell&gt;
+  );
+}</code></pre>
+      <p>Если <code>ServerText</code> не импортирован в клиентское поддерево модулей, он может оставаться Server Component, хотя визуально находится внутри <code>ClientShell</code> как дочерний элемент. Это важная часть композиции Server и Client Components.</p>
+    </section>
+
+    <section>
+      <h2>14. Client JS chunks загружаются</h2>
+      <p>После того как ссылки на Client Components известны, браузер начинает загружать JavaScript-фрагменты.</p>
+      <p>На этом этапе происходит получение файлов, но ещё не гидратация. Разница принципиальная.</p>
+      <p>Загруженный фрагмент — это файл, доступный браузеру. Выполненный фрагмент — это JavaScript-код, который уже был запущен. Гидратированный Client Component — это Client Component, к HTML которого React подключил обработчики событий и сделал его интерактивным.</p>
+      <p>Процесс можно описать как последовательность состояний. Сначала становится известно, что в дереве есть Client Component и для него нужен определённый JavaScript. Затем браузер получает соответствующий JavaScript-фрагмент. Только после этого клиентская среда Next.js и загруженный код могут выполниться, React сможет использовать RSC payload, а Client Component сможет пройти гидратацию.</p>
+      <p>На этом этапе ещё нет гидратации. Браузер только получает JavaScript-фрагменты, чтобы следующий шаг мог выполнить клиентскую среду Next.js и код Client Components.</p>
+    </section>
+
+    <section>
+      <h2>15. Можно показать server HTML / stream segment?</h2>
+      <p>Пока клиентский JavaScript загружается, браузер уже может иметь достаточно HTML и CSS, чтобы показать серверный результат.</p>
+      <p>Условие на уровне смысла:</p>
+      <ul>
+        <li>DOM для каркаса или сегмента уже построен;</li>
+        <li>CSS для этого отображения загружен и обработан;</li>
+        <li>браузер может перейти к визуальному pipeline.</li>
+      </ul>
+      <p>Здесь работает не гидратация Next.js, а браузерный rendering pipeline:</p>
+      <pre>Style → Layout → Paint → Composite</pre>
+      <p>Подробный разбор этого браузерного pipeline есть во внутренней статье <a href="https://di-not.github.io/Browser/style-layout-paint-composite.html">Style → Layout → Paint → Composite</a>.</p>
+      <p>Главная мысль для Next.js:</p>
+      <blockquote>
+        <p>Серверный HTML или потоковый сегмент может стать видимым до того, как Client Components стали интерактивными.</p>
+      </blockquote>
+      <p>Это не ошибка. Это один из смыслов потоковой передачи в App Router: пользователь получает видимое состояние раньше, чем полностью готова клиентская часть.</p>
+    </section>
+
+    <section>
+      <h2>16. Server HTML виден</h2>
+      <p><code>Server HTML виден</code> означает, что браузер показал HTML, полученный от сервера.</p>
+      <p>Видимым может быть:</p>
+      <ul>
+        <li>корневой <code>layout</code>;</li>
+        <li>общая навигация;</li>
+        <li>статический каркас страницы;</li>
+        <li>интерфейс загрузки;</li>
+        <li>запасной UI Suspense;</li>
+        <li>серверный сегмент маршрута;</li>
+        <li>HTML-предпросмотр маршрута, включая области, где позже будут Client Components.</li>
+      </ul>
+      <p>Если сегмент приостановлен, пользователь может сначала увидеть запасной UI:</p>
+      <pre><code>// app/feed/loading.tsx
+export default function Loading() {
+  return &lt;p&gt;Loading feed...&lt;/p&gt;;
+}</code></pre>
+      <p>Потом, когда содержимое сегмента готово, запасной UI заменяется готовым HTML. Визуально это выглядит как постепенное раскрытие страницы: сначала каркас и состояние загрузки, затем основное содержимое.</p>
+    </section>
+
+    <section>
+      <h2>17. Server Components видимы, но не гидрируются</h2>
+      <p><code>Server Components видимы, но не гидрируются</code> — одна из самых важных формулировок в этой ветке.</p>
+      <p>Server Component выполняется на сервере. Его результат может быть виден в браузере как HTML. Но сам Server Component не становится интерактивным браузерным компонентом, потому что его код не отправляется как клиентский компонентный код для гидратации.</p>
+      <p>Гидратация — это процесс, при котором React прикрепляет обработчики событий к уже существующему DOM, чтобы статический HTML стал интерактивным.</p>
+      <p>Разница:</p>
+      <p>Server Component:</p>
+      <ul>
+        <li>выполняется на сервере;</li>
+        <li>может попасть в HTML и RSC payload;</li>
+        <li>может быть видимым пользователю;</li>
+        <li>не использует состояние, обработчики событий, эффекты и API, существующие только в браузере;</li>
+        <li>не гидрируется как Client Component.</li>
+      </ul>
+      <p>Client Component:</p>
+      <ul>
+        <li>имеет JavaScript в клиентском пакете;</li>
+        <li>может использовать состояние, эффекты, обработчики событий и API браузера;</li>
+        <li>может иметь серверный HTML-предпросмотр при начальной загрузке;</li>
+        <li>нуждается в гидратации, чтобы стать интерактивным.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>18. Почему Server Components не гидрируются</h2>
+      <p>Server Components не гидрируются не потому, что они “не важны”. Они уже сделали свою работу на сервере: получили данные, сформировали UI и помогли уменьшить JavaScript, который нужно отправить в браузер.</p>
+      <p>Гидратация решает другую задачу: сделать HTML интерактивным на клиенте. Для этого нужен компонентный код в браузере и обработчики событий. Server Component не содержит клиентских обработчиков событий и не выполняется в браузере как интерактивный компонент.</p>
+      <p>Правильная модель такая:</p>
+      <ul>
+        <li>Server Component даёт видимый HTML и данные для RSC tree;</li>
+        <li>Client Component даёт интерактивную часть;</li>
+        <li>RSC payload связывает эти два мира;</li>
+        <li>клиентские JavaScript-фрагменты доставляют код для клиентских границ;</li>
+        <li>гидратация применяется к Client Components.</li>
+      </ul>
+      <p>Фраза <code>Server Components видимы, но не гидрируются</code> означает: пользователь видит результат серверного render-а, но интерактивность подключается только там, где есть граница Client Component.</p>
+    </section>
+
+    <section>
+      <h2>19. Client JS chunks загружены?</h2>
+      <p>Проверка <code>Client JS chunks загружены?</code> относится только к состоянию файлов. На этом шаге браузер уже получил JavaScript-фрагменты, которые нужны клиентской части маршрута, или продолжает их ждать.</p>
+      <p>Клиентский JavaScript-фрагмент — это не просто “код React вообще”. В App Router он может включать код Client Components, их зависимости, части клиентской среды React/Next.js и служебный код, который нужен для дальнейшей работы приложения в браузере.</p>
+      <p>Важно разделять три состояния. Загруженный JavaScript-фрагмент — файл уже получен из сети или из cache. Выполненный JavaScript-фрагмент — браузер уже запустил код из этого файла. Готовая клиентская граница — React и Next.js уже знают, где в общем дереве находится соответствующая Client Component часть и какой клиентский модуль ей соответствует. Гидратация начинается позже; в этой статье она не разбирается.</p>
+      <p>Если фрагменты ещё не загружены, браузер ждёт их. Если они загружены, можно перейти к выполнению клиентской среды Next.js и клиентского кода.</p>
+      <pre>Client JS chunks загружены?
+├─ Нет → Ждать client JS chunks
+└─ Да  → Запустить клиентский bootstrap Next.js / React</pre>
+      <p>Здесь нет автоматического перехода к интерактивности. Доступность файла — только условие для следующих шагов.</p>
+    </section>
+
+    <section>
+      <h2>20. Запустить клиентский bootstrap Next.js / React</h2>
+      <p>После того как нужные клиентские JavaScript-фрагменты загружены, браузер может выполнить этот JavaScript. Этот шаг удобно называть запуском клиентского bootstrap Next.js / React.</p>
+      <p><code>Bootstrap</code> здесь означает не один официальный файл с таким названием, а начальный запуск клиентской части приложения. Это технический этап: браузер выполняет код, который Next.js вставил в HTML как ссылки на JavaScript-фрагменты. Такой код поднимает клиентскую среду Next.js и React, регистрирует загруженные модули и делает доступными Client Components.</p>
+      <p>Эта стадия не должна пониматься как отдельный публичный lifecycle-этап Next.js. Официальная модель Next.js проще: HTML даёт быстрый неинтерактивный результат, RSC payload используется для согласования Server и Client деревьев, JavaScript используется для гидратации Client Components и интерактивности. Запуск bootstrap — это техническое условие, без которого JavaScript не смог бы начать эту работу.</p>
+      <p>На практике в этот момент могут произойти такие вещи:</p>
+      <ul>
+        <li>браузер выполняет служебный код Next.js и React;</li>
+        <li>загрузчик модулей регистрирует уже полученные JavaScript-фрагменты;</li>
+        <li>становятся доступными экспорты Client Components;</li>
+        <li>клиентская часть Next.js получает возможность читать RSC payload;</li>
+        <li>React получает основу для дальнейшего перехода к клиентским границам.</li>
+      </ul>
+      <p>Пример с модулем Client Component:</p>
+      <pre><code>'use client';
+
+console.log('LikeButton module evaluated');
+
+export function LikeButton({ likes }: { likes: number }) {
+  return (
+    &lt;button onClick={() =&gt; console.log('liked')}&gt;
+      {likes} likes
+    &lt;/button&gt;
+  );
+}</code></pre>
+      <p>Когда JavaScript-фрагмент с этим модулем выполнен, верхний уровень модуля может выполниться:</p>
+      <pre>LikeButton module evaluated</pre>
+      <p>Это уже выполнение JavaScript, но ещё не обязательно гидратация. Модуль стал доступен клиентской среде, однако React ещё должен сопоставить Client Component с уже существующим DOM и подключить обработчики событий. Это сопоставление относится к гидратации, которая идёт позже.</p>
+      <p>Правильное различие такое:</p>
+      <pre>загрузить JavaScript
+→ браузер получил файл
+
+выполнить JavaScript
+→ код модуля и клиентская среда стали доступны
+
+гидратировать Client Component
+→ React связал Client Component с существующим DOM и подключил обработчики событий</pre>
+    </section>
+
+    <section>
+      <h2>21. DOMContentLoaded может быть поставлен в очередь</h2>
+      <p>После выполнения соответствующих scripts браузер может поставить <code>DOMContentLoaded</code> в очередь, если HTML parsing уже завершён и выполнены scripts, которые должны завершиться до этого события.</p>
+      <p>В этой ветке <code>DOMContentLoaded</code> не является React-событием и не означает готовность Client Components. Это событие жизненного цикла документа. Оно показывает, что браузер дошёл до точки, где HTML-документ разобран, а нужные deferred/module scripts выполнены.</p>
+      <p>Для Next.js App Router важно не перепутать:</p>
+      <pre>DOMContentLoaded может быть поставлен в очередь
+≠
+Client Components гидратированы
+≠
+все интерактивные части готовы</pre>
+      <p>В этой статье <code>DOMContentLoaded</code> упоминается только как браузерная развилка после выполнения клиентских scripts. Подробный разбор <code>DOMContentLoaded</code> уже находится в отдельной внутренней статье: <a href="https://di-not.github.io/Browser/domcontentloaded-subresources-load.html">DOMContentLoaded → subresources → load</a>.</p>
+    </section>
+
+    <section>
+      <h2>22. Client runtime использует RSC payload</h2>
+      <p>После запуска клиентского bootstrap клиентская среда Next.js / React получает возможность использовать RSC payload.</p>
+      <p>RSC payload был получен от сервера как специальное представление результата Server Components. Он содержит результат Server Components, места для Client Components, ссылки на JavaScript-файлы Client Components и свойства, переданные через границу Server → Client.</p>
+      <p>На клиенте этот payload нужен не для показа “ещё одного HTML”. HTML уже мог быть показан браузером раньше. Payload нужен React и Next.js, чтобы восстановить смысловую структуру дерева: какие части пришли с сервера, где находятся клиентские границы, какие данные нужно передать в Client Components и какой клиентский модуль соответствует этим местам.</p>
+      <p>Пример:</p>
+      <pre><code>// Server Component
+import LikeButton from './like-button';
+
+export default async function Page() {
+  const post = await getPost();
+
+  return (
+    &lt;article&gt;
+      &lt;h1&gt;{post.title}&lt;/h1&gt;
+      &lt;p&gt;{post.text}&lt;/p&gt;
+      &lt;LikeButton likes={post.likes} /&gt;
+    &lt;/article&gt;
+  );
+}</code></pre>
+      <p>В HTML пользователь может уже видеть <code>h1</code>, <code>p</code> и даже HTML-предпросмотр кнопки. Но RSC payload дополнительно сообщает клиентской среде, что <code>LikeButton</code> — это граница Client Component, к ней нужно передать <code>likes</code>, а для её клиентской части нужен конкретный JavaScript-модуль.</p>
+      <p>На этом этапе клиентская среда не выполняет Server Components заново в браузере. Server Components уже выполнились на сервере. Клиент использует payload как описание того, как серверный результат связан с клиентскими границами.</p>
+      <p>Запуск bootstrap и использование RSC payload можно описать так:</p>
+      <pre>HTML уже мог быть показан
+→ JavaScript-фрагменты Next.js / React загружены
+→ браузер выполняет клиентский bootstrap
+→ клиентская среда получает доступ к RSC payload
+→ React/Next понимают, где находятся Client Component boundaries</pre>
+    </section>
+
+    <section>
+      <h2>23. Reconcile / merge Server и Client trees</h2>
+      <p><code>Reconcile / merge Server и Client trees</code> — это согласование Server и Client деревьев в одно React-дерево на клиенте.</p>
+      <p>В официальных материалах Next.js эта идея описана так: RSC Payload содержит references к местам Client Components, а на клиенте React использует RSC Payload, чтобы согласовать Server и Client Components в единое дерево. В русской статье удобно писать “согласовать и объединить”, потому что речь не о механическом склеивании HTML-строк, а о восстановлении React-структуры.</p>
+      <p>Здесь участвуют два разных представления:</p>
+      <ol>
+        <li>Server tree — результат Server Components, уже вычисленный на сервере и описанный в RSC payload.</li>
+        <li>Client tree — клиентские модули и Client Components, JavaScript которых уже загружен и выполнен.</li>
+      </ol>
+      <p>Согласование нужно, потому что в App Router приложение не является полностью клиентским деревом и не является только HTML. Оно состоит из Server Components, которые выполнялись на сервере, и Client Components, которые должны существовать как клиентские границы.</p>
+      <p>Пример смысловой структуры:</p>
+      <pre>Server Component: Page
+├─ Server Component result: &lt;h1&gt;Product&lt;/h1&gt;
+├─ Server Component result: &lt;p&gt;Description&lt;/p&gt;
+└─ Client Component boundary: AddToCartButton</pre>
+      <p>После использования RSC payload клиентская среда понимает, что <code>h1</code> и <code>p</code> — часть серверного результата, а <code>AddToCartButton</code> — место, где начинается клиентская часть. Само подключение этой клиентской части к DOM относится к следующему этапу, который в этой статье не раскрывается.</p>
+    </section>
+
+    <section>
+      <h2>24. Границы Client Components</h2>
+      <p><code>Границы Client Components</code> — точки в общем дереве, где серверная часть передаёт управление клиентской части.</p>
+      <p>Граница Client Component появляется из-за директивы <code>'use client'</code>. Она говорит React и Next.js: начиная с этого модуля, код должен быть частью клиентского поддерева модулей и должен быть доступен браузеру.</p>
+      <p>Пример:</p>
+      <pre><code>// app/product/add-to-cart-button.tsx
+'use client';
+
+export function AddToCartButton({ productId }: { productId: string }) {
+  return &lt;button onClick={() =&gt; addToCart(productId)}&gt;Add to cart&lt;/button&gt;;
+}</code></pre>
+      <p>Если Server Component использует этот компонент:</p>
+      <pre><code>// app/product/page.tsx
+import { AddToCartButton } from './add-to-cart-button';
+
+export default async function Page() {
+  const product = await getProduct();
+
+  return (
+    &lt;main&gt;
+      &lt;h1&gt;{product.title}&lt;/h1&gt;
+      &lt;AddToCartButton productId={product.id} /&gt;
+    &lt;/main&gt;
+  );
+}</code></pre>
+      <p>то в общем дереве появляется граница:</p>
+      <pre>Server Component: Page
+├─ server result: &lt;h1&gt;{product.title}&lt;/h1&gt;
+└─ Client Component boundary: AddToCartButton</pre>
+      <p>Граница означает несколько вещей.</p>
+      <p>Во-первых, JavaScript для этой клиентской части должен попасть в клиентские фрагменты. Во-вторых, свойства, переданные через эту границу, должны быть сериализуемыми React. В-третьих, Server Component может передать Client Component данные, но не может передать несериализуемую функцию как обычное свойство через эту границу. В-четвёртых, Client Component может использовать состояние, эффекты, обработчики событий и API браузера, потому что её код будет выполняться в браузере.</p>
+      <p>Граница Client Component не означает, что всё визуально вложенное внутрь неё автоматически стало Client Component. Важна граница в дереве зависимостей модулей. Компонент, переданный через <code>children</code>, может оставаться Server Component, если он не импортирован в клиентское поддерево модулей.</p>
+      <p>Пример:</p>
+      <pre><code>// Server Component
+import ClientShell from './client-shell';
+import ServerText from './server-text';
+
+export default function Page() {
+  return (
+    &lt;ClientShell&gt;
+      &lt;ServerText /&gt;
+    &lt;/ClientShell&gt;
+  );
+}</code></pre>
+      <p><code>ServerText</code> визуально находится внутри <code>ClientShell</code>, но если он не импортирован клиентским модулем, он может оставаться Server Component. Это не просто синтаксическая тонкость. Это объясняет, почему границы Client Components определяются не только JSX-вложенностью, а тем, какие модули входят в клиентское поддерево.</p>
+      <p>На этом статья останавливается. Следующий этап после границ Client Components — гидратация Client Components, но она здесь намеренно не раскрывается.</p>
+    </section>
+
+    <section>
+      <h2>25. Полный проход по диапазону</h2>
+      <p>Next.js начинает на сервере. Маршрут разбит на сегменты, а работа по созданию результата может быть разделена между <code>layout</code>, <code>page</code> и границами Suspense. Server Components превращаются в RSC payload. Client Components и RSC payload используются для предварительного HTML, который браузер сможет быстро показать как неинтерактивный результат.</p>
+      <p>Если часть маршрута готова сразу, она может попасть в ранний HTML. Если часть маршрута ждёт асинхронную работу, App Router может показать интерфейс загрузки или запасной UI Suspense и потоково отправить готовое содержимое позже. Поэтому HTML приходит фрагментами: сначала каркас или запасной UI, потом готовые сегменты.</p>
+      <p>Next.js server renderer формирует HTML/stream вокруг результата Server Components. В этом HTML могут быть ссылки на CSS, ссылки на JavaScript-фрагменты Next.js и Client Components, а также служебные inline scripts и данные, связанные с потоковой передачей и RSC payload. Поэтому браузер не только строит DOM из HTML, но и обнаруживает ресурсы, которые нужны клиентской части приложения.</p>
+      <p>Когда DOM и стили готовы, браузер может показать серверный HTML или отдельный потоковый сегмент. Это не означает, что вся страница интерактивна. Server Components могут быть видны как HTML, но они не гидрируются.</p>
+      <p>После загрузки клиентских JavaScript-фрагментов браузер может запустить клиентский bootstrap Next.js / React. Это не отдельная пользовательская стадия и не сама гидратация, а выполнение JavaScript, который делает доступными клиентскую среду, загрузчик модулей, код Client Components и работу с RSC payload. После выполнения соответствующих scripts <code>DOMContentLoaded</code> может быть поставлен в очередь, если выполнены браузерные условия этого события.</p>
+      <p>Затем клиентская среда использует RSC payload, чтобы понять серверный результат, места клиентских границ, переданные свойства и ссылки на клиентские модули. React согласует Server и Client деревья в одно общее дерево и выходит к границам Client Components. На этом диапазон статьи заканчивается: сама гидратация Client Components идёт дальше по ветке и здесь не раскрывается.</p>
+    </section>
+
+    <section>
+      <h2>26. Что важно не перепутать</h2>
+      <pre>Server HTML ≠ RSC payload</pre>
+      <p>HTML нужен для видимого предварительного результата. RSC payload нужен React и клиентской среде Next.js для дерева Server/Client Components.</p>
+      <pre>RSC payload ≠ client JavaScript</pre>
+      <p>RSC payload описывает результат Server Components, заполнители Client Components, ссылки на клиентские компоненты и свойства. Client chunks — это JavaScript-файлы, которые браузер загружает и выполняет.</p>
+      <pre>Client refs ≠ загруженные chunks</pre>
+      <p>Ссылки указывают, какой JavaScript нужен. Фрагменты ещё должны быть загружены.</p>
+      <pre>Client JS chunks загружены ≠ client chunks выполнены</pre>
+      <p>Файл может быть получен браузером, но код из него ещё может не быть запущен.</p>
+      <pre>Запустить клиентский bootstrap Next.js / React ≠ гидратация</pre>
+      <p>Запуск клиентского bootstrap означает, что браузер выполняет JavaScript, который поднимает клиентскую среду Next.js / React и делает доступными клиентские модули. Гидратация Client Components — следующий отдельный этап.</p>
+      <pre>Client runtime использует RSC payload ≠ повторно выполняет Server Components в браузере</pre>
+      <p>Server Components уже выполнились на сервере. Клиентская среда использует payload как описание серверного результата и клиентских границ.</p>
+      <pre>Reconcile / merge Server и Client trees ≠ изменить весь DOM заново</pre>
+      <p>Речь о согласовании React-дерева: серверный результат и клиентские границы должны стать единым деревом для дальнейшей клиентской работы.</p>
+      <pre>Границы Client Components ≠ гидратация Client Components</pre>
+      <p>Границы показывают, где в дереве начинается клиентская часть. Гидратация этих границ — следующий этап, который здесь не раскрывается.</p>
+      <pre>Потоковый HTML ≠ гидратация</pre>
+      <p>Потоковый HTML позволяет раньше показать DOM, полученный с сервера. Гидратация позже подключает интерактивность к Client Components.</p>
+      <pre>Server HTML виден ≠ страница полностью interactive</pre>
+      <p>HTML может быть показан как неинтерактивный предварительный результат.</p>
+      <pre>Server Components видимы ≠ Server Components гидрируются</pre>
+      <p>Server Components видимы как результат серверного render-а. Гидратация нужна Client Components.</p>
+      <pre>'use client' boundary ≠ просто визуальная вложенность</pre>
+      <p>Граница проходит по дереву зависимостей модулей. Визуальная вложенность через <code>children</code> не всегда делает дочерний элемент Client Component.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>Источники</h2>
+      <h3>Next.js</h3>
+      <ul>
+        <li><a href="https://nextjs.org/docs/app/getting-started/server-and-client-components">Next.js docs — Server and Client Components</a></li>
+        <li><a href="https://nextjs.org/docs/app/guides/streaming">Next.js docs — Streaming</a></li>
+        <li><a href="https://nextjs.org/docs/app/api-reference/file-conventions/loading">Next.js docs — loading.js</a></li>
+        <li><a href="https://nextjs.org/docs/messages/react-hydration-error">Next.js docs — Hydration error</a></li>
+        <li><a href="https://nextjs.org/docs/14/app/building-your-application/rendering/composition-patterns">Next.js docs — Server and Client Composition Patterns</a></li>
+        <li><a href="https://nextjs.org/docs/app/api-reference/components/script">Next.js docs — Script Component</a></li>
+        <li><a href="https://nextjs.org/docs/app/guides/scripts">Next.js docs — Scripts guide</a></li>
+      </ul>
+      <h3>React</h3>
+      <ul>
+        <li><a href="https://react.dev/reference/rsc/use-client">React docs — 'use client'</a></li>
+        <li><a href="https://react.dev/reference/rsc/server-components">React docs — Server Components</a></li>
+      </ul>
+      <h3>Дополнительное чтение</h3>
+      <ul>
+        <li><a href="https://www.oreilly.com/library/view/fluent-react/9781098138707/">Fluent React — Tejas Kumar</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
