@@ -542,68 +542,7 @@ Updater function получает pending state и возвращает след
     <hr>
 
     <section>
-      <h2>14. Несколько state-переменных в одном handler-е</h2>
-      <p>Batching работает не только для нескольких обновлений одной state-переменной.</p>
-      <p>Пример:</p>
-      <pre><code>
-function Panel() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [count, setCount] = useState(0);
-
-  function handleClick() {
-    setIsOpen(true);
-    setCount(c =&gt; c + 1);
-  }
-
-  return (
-    &lt;&gt;
-      &lt;button onClick={handleClick}&gt;Open and count&lt;/button&gt;
-      {isOpen &amp;&amp; &lt;p&gt;Open&lt;/p&gt;}
-      &lt;p&gt;{count}&lt;/p&gt;
-    &lt;/&gt;
-  );
-}
-      </code></pre>
-      <p>React может сгруппировать оба update и сделать один следующий render, а не два отдельных render-а.</p>
-      <p>Смысл batching:</p>
-      <pre><code>
-setIsOpen(true)
-setCount(c =&gt; c + 1)
-→ React собирает updates
-→ handler завершается
-→ React обрабатывает updates вместе
-→ один render-проход вместо нескольких
-      </code></pre>
-      <p>Это помогает избежать “полуготового” UI, где одна часть state уже обновлена, а другая ещё нет.</p>
-    </section>
-
-    <hr>
-
-    <section>
-      <h2>15. Несколько компонентов</h2>
-      <p>Batching может объединять updates даже из разных компонентов, если они происходят в рамках одного обрабатываемого события или одного batch.</p>
-      <p>Пример:</p>
-      <pre><code>
-function Parent() {
-  const [selected, setSelected] = useState&lt;string | null&gt;(null);
-  const [logCount, setLogCount] = useState(0);
-
-  function handleSelect(id: string) {
-    setSelected(id);
-    setLogCount(c =&gt; c + 1);
-  }
-
-  return &lt;List onSelect={handleSelect} /&gt;;
-}
-      </code></pre>
-      <p>Если <code>handleSelect</code> передан глубоко вниз и вызван из дочернего обработчика, updates всё равно относятся к одному React-обновлению на уровне смысла: один пользовательский жест вызвал цепочку обработчиков, внутри которой были поставлены updates.</p>
-      <p>Не нужно представлять batching как “React объединяет только соседние строки кода”. Он группирует state updates в рамках безопасной границы обработки.</p>
-    </section>
-
-    <hr>
-
-    <section>
-      <h2>16. Batching</h2>
+      <h2>14. Batching</h2>
       <p>Batching — это группировка нескольких state updates в один render-проход.</p>
       <p>Классическая модель для React events:</p>
       <pre><code>
@@ -634,7 +573,7 @@ function handleClick() {
     <hr>
 
     <section>
-      <h2>17. React не batch-ит разные intentional events как один общий update</h2>
+      <h2>15. React не batch-ит разные intentional events как один общий update</h2>
       <p>Batching не означает, что React бесконечно собирает все updates со всей страницы.</p>
       <p>Отдельные намеренные действия пользователя, например разные клики, обрабатываются отдельно. Это важно для корректности UI. Например, если первый клик отключает форму, второй клик не должен быть объединён с первым так, чтобы форма успела отправиться повторно.</p>
       <p>Модель:</p>
@@ -654,7 +593,7 @@ click #2
     <hr>
 
     <section>
-      <h2>18. Automatic batching в React 18+</h2>
+      <h2>16. Automatic batching в React 18+</h2>
       <p>В React 18 с <code>createRoot</code> batching стал автоматическим для большего числа источников updates.</p>
       <p>До React 18 React по умолчанию batch-ил updates внутри React event handlers, но updates из <code>setTimeout</code>, Promise callbacks, native event handlers и других источников могли вести себя иначе.</p>
       <p>В React 18 с <code>createRoot</code> updates автоматически batch-ятся независимо от того, откуда они пришли: из React event, timeout, Promise, native event handler или другого события.</p>
@@ -679,7 +618,7 @@ setTimeout(() =&gt; {
     <hr>
 
     <section>
-      <h2>19. `flushSync` как исключение</h2>
+      <h2>17. `flushSync` как исключение</h2>
       <p>Иногда нужно принудительно заставить React синхронно применить updates и обновить DOM раньше обычного.</p>
       <p>Для этого есть <code>flushSync</code> из <code>react-dom</code>:</p>
       <pre><code>
@@ -710,7 +649,7 @@ flushSync
     <hr>
 
     <section>
-      <h2>20. State как immutable value</h2>
+      <h2>18. State как immutable value</h2>
       <p>Если state содержит объект или массив, его нельзя обновлять мутацией старого значения.</p>
       <p>Неправильно:</p>
       <pre><code>
@@ -763,7 +702,7 @@ setState(newObject)
     <hr>
 
     <section>
-      <h2>21. Что batching не делает</h2>
+      <h2>19. Что batching не делает</h2>
       <p>Batching часто понимают слишком широко. Нужно зафиксировать границы.</p>
       <pre><code>
 Batching ≠ немедленное изменение state-переменной в текущем handler-е
@@ -790,7 +729,7 @@ Batching ≠ lanes
     <hr>
 
     <section>
-      <h2>22. Полный проход по диапазону</h2>
+      <h2>20. Полный проход по диапазону</h2>
       <p>Пользователь кликает по кнопке. Браузер создаёт DOM event. React event system получает это событие и вызывает обработчик, который был передан в JSX как <code>onClick</code>.</p>
       <p>Обработчик выполняется как обычная JavaScript-функция. Он может читать props и state из snapshot текущего render-а, может вызвать <code>event.preventDefault()</code> или <code>event.stopPropagation()</code>, может выполнить прикладную логику и может вызвать <code>setState</code> или <code>dispatch</code>.</p>
       <p>Вызов <code>setState</code> не меняет текущую state-переменную внутри handler-а. Он ставит update в очередь React. Если передано значение, React воспринимает это как замену state на это значение. Если передана updater function, React позже применит её к pending state.</p>
@@ -801,7 +740,7 @@ Batching ≠ lanes
     <hr>
 
     <section>
-      <h2>23. Что важно не перепутать</h2>
+      <h2>21. Что важно не перепутать</h2>
       <pre><code>
 Browser DOM event ≠ React event object
       </code></pre>
