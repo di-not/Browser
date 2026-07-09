@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>React client update: user action → event handler → queue update → batching</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>React client update: user action → event handler → queue update → batching</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h3>Коротко</h3>
+      <p>Эта статья разбирает первую часть клиентского обновления React:</p>
+      <pre><code>
+Пользователь совершает действие
+→ Browser DOM event
+→ React event system / Synthetic Event
+→ Event handler
+→ setState / dispatch
+→ Queue update
+→ Batching
+→ дальше React будет планировать работу
+      </code></pre>
+      <p>Главная идея:</p>
+      <blockquote>
+        <p>Обработчик события не обновляет DOM напрямую. Он выполняется как JavaScript-функция, вызывает <code>setState</code> или <code>dispatch</code>, а React ставит обновления в очередь и группирует их. DOM будет изменён позже, после scheduling, render/reconciliation и commit.</p>
+      </blockquote>
+      <p>Эта статья относится к уже интерактивной клиентской части приложения: например, к Client Components в Next.js App Router после гидратации. Server Components здесь не участвуют как интерактивные компоненты: пользовательское событие обрабатывается клиентским JavaScript.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Общая модель</h2>
+      <p>Когда пользователь кликает по кнопке, вводит текст или отправляет форму, React не “магически” меняет DOM в момент клика.</p>
+      <p>Сначала событие возникает на уровне браузера. Затем React пропускает его через свою event system и вызывает обработчик, который был указан в JSX. Если внутри обработчика вызывается <code>setState</code> или <code>dispatch</code>, React получает запрос на обновление состояния. Этот запрос попадает в очередь. Если таких запросов несколько, React может сгруппировать их, чтобы не запускать лишние render-проходы.</p>
+      <p>Смысловая цепочка:</p>
+      <pre><code>
+click / input / submit
+→ браузер создаёт DOM event
+→ React получает событие через свою event system
+→ React вызывает event handler из JSX
+→ handler вызывает setState / dispatch
+→ React ставит update в очередь
+→ React группирует updates
+→ следующий этап: scheduling
+      </code></pre>
+      <p>Ни один из блоков до batching не означает, что DOM уже обновлён. DOM будет обновляться позже, если после render/reconciliation React дойдёт до commit phase и найдёт изменения.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>2. User action → Browser DOM event</h2>
+      <p>Пользовательское действие начинается не в React, а в браузере.</p>
+      <p>Примеры действий:</p>
+      <pre><code>
+click
+input
+change
+submit
+keydown
+pointermove
+focus
+blur
+      </code></pre>
+      <p>Когда такое действие происходит, браузер создаёт объект события и доставляет его в event system DOM. У события есть цель (<code>target</code>), текущий обработчик (<code>currentTarget</code>), фазы распространения, возможность отменить default behavior и возможность остановить распространение.</p>
+      <p>Пример браузерной модели без React:</p>
+      <pre><code>
+button.addEventListener('click', event =&gt; {
+  console.log(event.target);
+  console.log(event.currentTarget);
+});
+      </code></pre>
+      <p>В React разработчик обычно не вызывает <code>addEventListener</code> для обычных UI-событий напрямую. Вместо этого он передаёт обработчик как prop в JSX:</p>
+      <pre><code>
+&lt;button onClick={handleClick}&gt;
+  Save
+&lt;/button&gt;
+      </code></pre>
+      <p>Но под React-синтаксисом всё равно лежит браузерная реальность: пользователь совершает действие, браузер создаёт DOM event, дальше React обрабатывает его своим слоем.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>3. React event system / Synthetic Event</h2>
+      <p>В React обработчик получает React event object. Его также называют <code>SyntheticEvent</code>.</p>
+      <p>Пример:</p>
+      <pre><code>
+function SaveButton() {
+  function handleClick(event: React.MouseEvent&lt;HTMLButtonElement&gt;) {
+    console.log(event);
+  }
+
+  return &lt;button onClick={handleClick}&gt;Save&lt;/button&gt;;
+}
+      </code></pre>
+      <p>React event object похож на стандартный DOM event и поддерживает знакомые методы:</p>
+      <pre><code>
+event.preventDefault()
+event.stopPropagation()
+event.target
+event.currentTarget
+event.nativeEvent
+      </code></pre>
+      <p>Но это не обязательно тот же самый объект, который браузер создал изначально. React event object нормализует поведение между браузерами и отражает то, что ожидает React-код. Если нужен исходный браузерный event, он доступен через <code>event.nativeEvent</code>.</p>
+      <p>Важные детали:</p>
+      <pre><code>
+React event object ≠ всегда прямой native DOM event
+
+event.nativeEvent
+→ исходный DOM event
+
+event.currentTarget
+→ элемент, к которому привязан текущий React handler
+
+event.target
+→ элемент, на котором событие произошло
+      </code></pre>
+      <p>React docs отдельно предупреждает, что некоторые React events не соответствуют напрямую нативным браузерным событиям. Например, для <code>onMouseLeave</code> <code>nativeEvent</code> может указывать на другой тип браузерного события. Такое сопоставление не является публичным API, на который нужно опираться.</p>
+      <p>Ещё одна важная деталь: React под капотом прикрепляет event handlers на root, но React event object скрывает эту реализацию. Поэтому <code>event.currentTarget</code> в React отражает ожидаемую для React-дерева точку обработки, а не обязательно <code>currentTarget</code> исходного <code>nativeEvent</code>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>4. Event handler</h2>
+      <p>Event handler — это функция, которую React вызывает в ответ на событие.</p>
+      <p>Пример:</p>
+      <pre><code>
+function CounterButton() {
+  function handleClick() {
+    console.log('clicked');
+  }
+
+  return &lt;button onClick={handleClick}&gt;Click&lt;/button&gt;;
+}
+      </code></pre>
+      <p>Обработчик нужно передать, а не вызвать во время render:</p>
+      <pre><code>
+// правильно
+&lt;button onClick={handleClick}&gt;Click&lt;/button&gt;
+
+// неправильно
+&lt;button onClick={handleClick()}&gt;Click&lt;/button&gt;
+      </code></pre>
+      <p>Во втором варианте <code>handleClick()</code> выполнится сразу во время render, а не при клике.</p>
+      <p>Event handler обычно объявляют внутри компонента, поэтому он может читать props, state и локальные переменные, которые были доступны во время того render-а, где этот handler был создан.</p>
+      <p>Пример:</p>
+      <pre><code>
+function Counter({ step }: { step: number }) {
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    setCount(count + step);
+  }
+
+  return &lt;button onClick={handleClick}&gt;{count}&lt;/button&gt;;
+}
+      </code></pre>
+      <p>Здесь <code>handleClick</code> видит <code>count</code> и <code>step</code> из конкретного render-а. Это важно для понимания state snapshot.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>5. Event handlers могут иметь side effects</h2>
+      <p>React-компоненты и Hooks должны быть чистыми во время render. Event handlers — другое место. Они выполняются не во время render, а в ответ на действие пользователя, поэтому именно в них обычно размещают побочные действия, связанные с интеракцией.</p>
+      <p>Примеры допустимой логики в handler:</p>
+      <pre><code>
+function Form() {
+  const [name, setName] = useState('');
+
+  function handleChange(event: React.ChangeEvent&lt;HTMLInputElement&gt;) {
+    setName(event.target.value);
+  }
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    console.log('submit', name);
+  }
+
+  return (
+    &lt;form onSubmit={handleSubmit}&gt;
+      &lt;input value={name} onChange={handleChange} /&gt;
+      &lt;button&gt;Send&lt;/button&gt;
+    &lt;/form&gt;
+  );
+}
+      </code></pre>
+      <p>Здесь обработчики:</p>
+      <pre><code>
+читают event
+вызывают preventDefault
+обновляют state
+выполняют прикладную логику
+      </code></pre>
+      <p>Это нормально. Но важно: даже если handler вызывает <code>setState</code>, он не меняет DOM сразу. Он только сообщает React, что нужно подготовить обновление.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>6. Propagation и default behavior</h2>
+      <p>React events поддерживают распространение события вверх по дереву.</p>
+      <p>Пример:</p>
+      <pre><code>
+function Toolbar() {
+  return (
+    &lt;div onClick={() =&gt; console.log('toolbar')}&gt;
+      &lt;button onClick={() =&gt; console.log('button')}&gt;
+        Play
+      &lt;/button&gt;
+    &lt;/div&gt;
+  );
+}
+      </code></pre>
+      <p>При клике по кнопке сначала выполнится обработчик кнопки, затем событие всплывёт к родительскому <code>div</code>.</p>
+      <p>Чтобы остановить распространение:</p>
+      <pre><code>
+&lt;button
+  onClick={event =&gt; {
+    event.stopPropagation();
+    console.log('button');
+  }}
+&gt;
+  Play
+&lt;/button&gt;
+      </code></pre>
+      <p><code>stopPropagation()</code> не отменяет default behavior браузера. Он останавливает прохождение события дальше по дереву обработчиков.</p>
+      <p>Для отмены default behavior используется <code>preventDefault()</code>.</p>
+      <p>Типичный пример — форма:</p>
+      <pre><code>
+&lt;form
+  onSubmit={event =&gt; {
+    event.preventDefault();
+    sendForm();
+  }}
+&gt;
+  &lt;button&gt;Send&lt;/button&gt;
+&lt;/form&gt;
+      </code></pre>
+      <p>Без <code>preventDefault()</code> обычная HTML-форма может выполнить стандартную отправку и перезагрузить страницу. В React-приложении часто нужно отменить это поведение и обработать отправку в JavaScript.</p>
+      <p>Нужно различать:</p>
+      <pre><code>
+event.stopPropagation()
+→ не даёт событию пройти к родительским React handlers
+
+event.preventDefault()
+→ отменяет стандартное браузерное действие, если оно есть и если событие cancelable
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>7. Event handler и state snapshot</h2>
+      <p>State в React не ведёт себя как обычная изменяемая переменная внутри уже выполняющегося кода.</p>
+      <p>Когда React вызывает компонент, компонент возвращает JSX snapshot: UI, props, state, локальные переменные и event handlers для конкретного render-а. Обработчик события, созданный в этом render-е, видит именно эти значения.</p>
+      <p>Пример:</p>
+      <pre><code>
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    console.log(count);
+    setCount(count + 1);
+    console.log(count);
+  }
+
+  return &lt;button onClick={handleClick}&gt;{count}&lt;/button&gt;;
+}
+      </code></pre>
+      <p>Если на экране <code>0</code>, оба <code>console.log(count)</code> внутри одного handler-а выведут <code>0</code>.</p>
+      <p>Причина:</p>
+      <pre><code>
+count внутри handler-а
+→ значение из текущего render snapshot
+
+setCount(count + 1)
+→ запросить следующий render с новым значением
+
+текущая переменная count
+→ не меняется внутри уже выполняющегося handler-а
+      </code></pre>
+      <p>Вызов <code>setState</code> не переписывает переменную, которую текущий handler уже получил из render-а. Он ставит React задачу подготовить следующий render.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>8. `setState` не обновляет DOM сразу</h2>
+      <p><code>setState</code> — это запрос на обновление состояния.</p>
+      <p>Пример:</p>
+      <pre><code>
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    setCount(count + 1);
+  }
+
+  return &lt;button onClick={handleClick}&gt;{count}&lt;/button&gt;;
+}
+      </code></pre>
+      <p>Когда handler вызывает <code>setCount(count + 1)</code>, React получает новое желаемое значение для следующего render-а. Но это ещё не DOM mutation.</p>
+      <p>Смысл:</p>
+      <pre><code>
+setCount(...)
+→ React запоминает update
+→ React позже вызовет компонент снова
+→ компонент вернёт новый JSX snapshot
+→ React сравнит результат
+→ если есть изменения, commit phase обновит DOM
+      </code></pre>
+      <p>Текущая статья заканчивается раньше render/reconciliation и commit phase. Поэтому в этой статье важно удержать границу:</p>
+      <pre><code>
+setState
+≠
+render уже произошёл
+
+render
+≠
+DOM уже изменён
+
+DOM mutation
+→ произойдёт только на commit phase
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>9. `dispatch` из `useReducer`</h2>
+      <p><code>useReducer</code> — другой способ описать state update. Он особенно удобен, когда логика обновления сложная или когда несколько обработчиков создают разные действия.</p>
+      <p>Пример:</p>
+      <pre><code>
+type State = {
+  count: number;
+};
+
+type Action =
+  | { type: 'increment' }
+  | { type: 'reset' };
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'increment':
+      return { count: state.count + 1 };
+    case 'reset':
+      return { count: 0 };
+    default:
+      return state;
+  }
+}
+
+function Counter() {
+  const [state, dispatch] = useReducer(reducer, { count: 0 });
+
+  function handleClick() {
+    dispatch({ type: 'increment' });
+  }
+
+  return &lt;button onClick={handleClick}&gt;{state.count}&lt;/button&gt;;
+}
+      </code></pre>
+      <p>На уровне flow <code>dispatch</code> похож на <code>setState</code>:</p>
+      <pre><code>
+event handler
+→ dispatch(action)
+→ React получает action
+→ action попадёт в обработку state queue
+→ во время следующего render-а React применит reducer
+→ reducer вернёт next state
+      </code></pre>
+      <p>Reducer должен быть чистой функцией: получить <code>state</code> и <code>action</code>, вернуть следующий state. Он не должен мутировать старый state, выполнять запросы, менять DOM или зависеть от случайных внешних эффектов.</p>
+      <p>В handler-е желательно описывать действие пользователя:</p>
+      <pre><code>
+dispatch({ type: 'submitted_form' });
+dispatch({ type: 'changed_name', nextName: event.target.value });
+dispatch({ type: 'reset_clicked' });
+      </code></pre>
+      <p>Action не обязан описывать конкретную мутацию поля. Он часто описывает то, что произошло в UI.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>10. Queue update</h2>
+      <p><code>Queue update</code> означает, что React не обязан обработать update немедленно в момент вызова <code>setState</code>.</p>
+      <p>Когда handler вызывает:</p>
+      <pre><code>
+setCount(count + 1);
+      </code></pre>
+      <p>React получает update вида:</p>
+      <pre><code>
+заменить count на значение count + 1,
+вычисленное из текущего render snapshot
+      </code></pre>
+      <p>Когда handler вызывает:</p>
+      <pre><code>
+setCount(c =&gt; c + 1);
+      </code></pre>
+      <p>React получает updater function:</p>
+      <pre><code>
+когда будешь обрабатывать очередь,
+возьми pending state
+и верни pending state + 1
+      </code></pre>
+      <p>Эти два варианта выглядят похоже, но ведут себя по-разному, если обновлений несколько.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>11. Передача значения: `setCount(count + 1)`</h2>
+      <p>Рассмотрим пример:</p>
+      <pre><code>
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    setCount(count + 1);
+    setCount(count + 1);
+    setCount(count + 1);
+  }
+
+  return &lt;button onClick={handleClick}&gt;{count}&lt;/button&gt;;
+}
+      </code></pre>
+      <p>Если на экране <code>0</code>, внутри текущего handler-а <code>count</code> тоже <code>0</code>. Поэтому все три вызова превращаются в одно и то же:</p>
+      <pre><code>
+setCount(0 + 1)
+setCount(0 + 1)
+setCount(0 + 1)
+      </code></pre>
+      <p>Для React это три запроса “заменить state на <code>1</code>”. В результате следующий state будет <code>1</code>, а не <code>3</code>.</p>
+      <p>Это не баг batching. Это следствие state snapshot: handler видит фиксированное значение <code>count</code> из render-а, в котором handler был создан.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>12. Updater function: `setCount(c =&gt; c + 1)`</h2>
+      <p>Если новое значение зависит от предыдущего значения той же state-переменной, можно передать updater function.</p>
+      <pre><code>
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    setCount(c =&gt; c + 1);
+    setCount(c =&gt; c + 1);
+    setCount(c =&gt; c + 1);
+  }
+
+  return &lt;button onClick={handleClick}&gt;{count}&lt;/button&gt;;
+}
+      </code></pre>
+      <p>Теперь React получает не три одинаковых значения, а три функции, которые нужно применить последовательно к pending state.</p>
+      <p>Если pending state был <code>0</code>, очередь можно представить так:</p>
+      <pre><code>
+c =&gt; c + 1
+c =&gt; c + 1
+c =&gt; c + 1
+      </code></pre>
+      <p>Обработка:</p>
+      <pre><code>
+0 → 1
+1 → 2
+2 → 3
+      </code></pre>
+      <p>Следующий state будет <code>3</code>.</p>
+      <p>Updater function особенно важна, когда:</p>
+      <pre><code>
+новое значение зависит от предыдущего значения той же state-переменной
+несколько updates вызываются в одном handler-е
+update может быть отложен
+нужно избежать чтения устаревшего snapshot
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>13. Смешивание replace update и updater function</h2>
+      <p>React обрабатывает очередь updates по порядку. В очереди могут быть как “заменить state на значение”, так и updater functions.</p>
+      <p>Пример:</p>
+      <pre><code>
+function handleClick() {
+  setNumber(number + 5);
+  setNumber(n =&gt; n + 1);
+}
+      </code></pre>
+      <p>Если <code>number</code> в текущем snapshot равен <code>0</code>, первый update означает:</p>
+      <pre><code>
+replace with 5
+      </code></pre>
+      <p>Второй update означает:</p>
+      <pre><code>
+взять pending state и прибавить 1
+      </code></pre>
+      <p>Итог:</p>
+      <pre><code>
+0
+→ replace with 5
+→ 5 + 1
+→ 6
+      </code></pre>
+      <p>Другой пример:</p>
+      <pre><code>
+function handleClick() {
+  setNumber(number + 5);
+  setNumber(n =&gt; n + 1);
+  setNumber(42);
+}
+      </code></pre>
+      <p>Если <code>number</code> был <code>0</code>, итог будет <code>42</code>:</p>
+      <pre><code>
+0
+→ replace with 5
+→ 6
+→ replace with 42
+→ 42
+      </code></pre>
+      <p>Здесь важно понять не “последний setState всегда побеждает”, а более точное правило:</p>
+      <pre><code>
+React обрабатывает queued updates по порядку.
+Значение replace update заменяет pending state.
+Updater function получает pending state и возвращает следующий.
+      </code></pre>
+      <p>Если все updates — простые replace values, последний replace действительно может определить итог. Если в очереди есть updater functions, итог зависит от порядка и типа каждого update.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>14. Несколько state-переменных в одном handler-е</h2>
+      <p>Batching работает не только для нескольких обновлений одной state-переменной.</p>
+      <p>Пример:</p>
+      <pre><code>
+function Panel() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    setIsOpen(true);
+    setCount(c =&gt; c + 1);
+  }
+
+  return (
+    &lt;&gt;
+      &lt;button onClick={handleClick}&gt;Open and count&lt;/button&gt;
+      {isOpen &amp;&amp; &lt;p&gt;Open&lt;/p&gt;}
+      &lt;p&gt;{count}&lt;/p&gt;
+    &lt;/&gt;
+  );
+}
+      </code></pre>
+      <p>React может сгруппировать оба update и сделать один следующий render, а не два отдельных render-а.</p>
+      <p>Смысл batching:</p>
+      <pre><code>
+setIsOpen(true)
+setCount(c =&gt; c + 1)
+→ React собирает updates
+→ handler завершается
+→ React обрабатывает updates вместе
+→ один render-проход вместо нескольких
+      </code></pre>
+      <p>Это помогает избежать “полуготового” UI, где одна часть state уже обновлена, а другая ещё нет.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>15. Несколько компонентов</h2>
+      <p>Batching может объединять updates даже из разных компонентов, если они происходят в рамках одного обрабатываемого события или одного batch.</p>
+      <p>Пример:</p>
+      <pre><code>
+function Parent() {
+  const [selected, setSelected] = useState&lt;string | null&gt;(null);
+  const [logCount, setLogCount] = useState(0);
+
+  function handleSelect(id: string) {
+    setSelected(id);
+    setLogCount(c =&gt; c + 1);
+  }
+
+  return &lt;List onSelect={handleSelect} /&gt;;
+}
+      </code></pre>
+      <p>Если <code>handleSelect</code> передан глубоко вниз и вызван из дочернего обработчика, updates всё равно относятся к одному React-обновлению на уровне смысла: один пользовательский жест вызвал цепочку обработчиков, внутри которой были поставлены updates.</p>
+      <p>Не нужно представлять batching как “React объединяет только соседние строки кода”. Он группирует state updates в рамках безопасной границы обработки.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>16. Batching</h2>
+      <p>Batching — это группировка нескольких state updates в один render-проход.</p>
+      <p>Классическая модель для React events:</p>
+      <pre><code>
+handler начал выполняться
+→ внутри handler-а вызываются setState / dispatch
+→ React ставит updates в очередь
+→ handler завершился
+→ React обрабатывает updates вместе
+→ один render вместо нескольких
+      </code></pre>
+      <p>React docs прямо объясняет, что React ждёт окончания выполнения всего кода в event handler перед обработкой state updates. Поэтому UI не обновляется посередине handler-а.</p>
+      <p>Пример:</p>
+      <pre><code>
+function handleClick() {
+  setCount(c =&gt; c + 1);
+  setFlag(f =&gt; !f);
+  console.log('handler still running');
+}
+      </code></pre>
+      <p>React не обязан обновлять экран после <code>setCount</code>, потом ещё раз после <code>setFlag</code>. Он может дождаться завершения handler-а и обработать updates вместе.</p>
+      <p>Это даёт два эффекта:</p>
+      <pre><code>
+меньше render-проходов
+нет промежуточного UI, где обновилась только часть state
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>17. React не batch-ит разные intentional events как один общий update</h2>
+      <p>Batching не означает, что React бесконечно собирает все updates со всей страницы.</p>
+      <p>Отдельные намеренные действия пользователя, например разные клики, обрабатываются отдельно. Это важно для корректности UI. Например, если первый клик отключает форму, второй клик не должен быть объединён с первым так, чтобы форма успела отправиться повторно.</p>
+      <p>Модель:</p>
+      <pre><code>
+click #1
+→ свой handler
+→ свой batch updates
+→ React может обновить UI
+
+click #2
+→ отдельный handler
+→ отдельный batch updates
+      </code></pre>
+      <p>React применяет batching там, где это безопасно для пользовательского взаимодействия.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>18. Automatic batching в React 18+</h2>
+      <p>В React 18 с <code>createRoot</code> batching стал автоматическим для большего числа источников updates.</p>
+      <p>До React 18 React по умолчанию batch-ил updates внутри React event handlers, но updates из <code>setTimeout</code>, Promise callbacks, native event handlers и других источников могли вести себя иначе.</p>
+      <p>В React 18 с <code>createRoot</code> updates автоматически batch-ятся независимо от того, откуда они пришли: из React event, timeout, Promise, native event handler или другого события.</p>
+      <p>Пример:</p>
+      <pre><code>
+function handleClick() {
+  setCount(c =&gt; c + 1);
+  setFlag(f =&gt; !f);
+}
+      </code></pre>
+      <p>И пример с timeout:</p>
+      <pre><code>
+setTimeout(() =&gt; {
+  setCount(c =&gt; c + 1);
+  setFlag(f =&gt; !f);
+}, 1000);
+      </code></pre>
+      <p>В React 18 с <code>createRoot</code> оба варианта могут быть обработаны с batching: React сделает один render в конце batch, а не отдельный render для каждого <code>setState</code>.</p>
+      <p>Для современной Next.js/React-модели это важная базовая предпосылка: batching уже не стоит понимать только как “внутри onClick”. Но статья всё равно начинается с пользовательского действия, потому что это самый понятный вход в flow.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>19. `flushSync` как исключение</h2>
+      <p>Иногда нужно принудительно заставить React синхронно применить updates и обновить DOM раньше обычного.</p>
+      <p>Для этого есть <code>flushSync</code> из <code>react-dom</code>:</p>
+      <pre><code>
+import { flushSync } from 'react-dom';
+
+function handleClick() {
+  flushSync(() =&gt; {
+    setCount(c =&gt; c + 1);
+  });
+
+  // К этому месту React уже попытался обновить DOM для этого update.
+}
+      </code></pre>
+      <p>Это исключение, а не обычный путь. React docs предупреждает, что <code>flushSync</code> используется редко и может ухудшить производительность. В обычном коде лучше позволять React batch-ить updates и планировать работу самому.</p>
+      <p>Для текущей ветки это важно как контраст:</p>
+      <pre><code>
+обычный setState
+→ update queue
+→ batching
+→ scheduling позже
+
+flushSync
+→ принудительно сбросить update синхронно
+→ использовать редко
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>20. State как immutable value</h2>
+      <p>Если state содержит объект или массив, его нельзя обновлять мутацией старого значения.</p>
+      <p>Неправильно:</p>
+      <pre><code>
+function MovingDot() {
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+
+  function handlePointerMove(event: React.PointerEvent&lt;HTMLDivElement&gt;) {
+    position.x = event.clientX;
+    position.y = event.clientY;
+  }
+
+  return &lt;div onPointerMove={handlePointerMove} /&gt;;
+}
+      </code></pre>
+      <p>Этот код мутирует объект из прошлого render snapshot, но не вызывает setter. React не узнаёт, что нужно подготовить обновление.</p>
+      <p>Правильно:</p>
+      <pre><code>
+function MovingDot() {
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+
+  function handlePointerMove(event: React.PointerEvent&lt;HTMLDivElement&gt;) {
+    setPosition({
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }
+
+  return &lt;div onPointerMove={handlePointerMove} /&gt;;
+}
+      </code></pre>
+      <p>Если нужно сохранить часть старого объекта:</p>
+      <pre><code>
+setPerson({
+  ...person,
+  firstName: event.target.value,
+});
+      </code></pre>
+      <p>Связь с update queue такая:</p>
+      <pre><code>
+мутация старого объекта
+→ React не получает update
+
+setState(newObject)
+→ React получает update
+→ update попадает в очередь
+      </code></pre>
+      <p>Кроме того, если новое значение state идентично текущему по <code>Object.is</code>, React может пропустить re-render как оптимизацию. Поэтому для объектов и массивов важно передавать новое значение, а не тот же объект после мутации.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>21. Что batching не делает</h2>
+      <p>Batching часто понимают слишком широко. Нужно зафиксировать границы.</p>
+      <pre><code>
+Batching ≠ немедленное изменение state-переменной в текущем handler-е
+      </code></pre>
+      <p>State внутри handler-а остаётся snapshot из текущего render-а.</p>
+      <pre><code>
+Batching ≠ немедленное изменение DOM
+      </code></pre>
+      <p>DOM будет обновлён только позже, если React дойдёт до commit phase.</p>
+      <pre><code>
+Batching ≠ объединение всех событий навсегда
+      </code></pre>
+      <p>React не batch-ит разные intentional user events как один бесконечный batch.</p>
+      <pre><code>
+Batching ≠ пропуск render всегда
+      </code></pre>
+      <p>Batching уменьшает количество render-проходов, но не означает, что render не будет. Он означает, что несколько updates могут привести к одному render вместо нескольких.</p>
+      <pre><code>
+Batching ≠ lanes
+      </code></pre>
+      <p>Batching группирует updates. Lanes и priority относятся к следующей статье: как React планирует работу.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>22. Полный проход по диапазону</h2>
+      <p>Пользователь кликает по кнопке. Браузер создаёт DOM event. React event system получает это событие и вызывает обработчик, который был передан в JSX как <code>onClick</code>.</p>
+      <p>Обработчик выполняется как обычная JavaScript-функция. Он может читать props и state из snapshot текущего render-а, может вызвать <code>event.preventDefault()</code> или <code>event.stopPropagation()</code>, может выполнить прикладную логику и может вызвать <code>setState</code> или <code>dispatch</code>.</p>
+      <p>Вызов <code>setState</code> не меняет текущую state-переменную внутри handler-а. Он ставит update в очередь React. Если передано значение, React воспринимает это как замену state на это значение. Если передана updater function, React позже применит её к pending state.</p>
+      <p>Если в рамках одного события вызывается несколько updates, React группирует их. Он ждёт завершения handler-а и затем обрабатывает updates вместе, чтобы избежать лишних render-проходов и промежуточных “полуготовых” состояний UI.</p>
+      <p>После batching эта статья заканчивается. Дальше React должен запланировать работу: определить приоритет, lane и перейти к render/reconciliation. Это уже следующая часть flow.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>23. Что важно не перепутать</h2>
+      <pre><code>
+Browser DOM event ≠ React event object
+      </code></pre>
+      <p>Браузер создаёт native event. React передаёт handler-у React event object, который похож на DOM event, но является частью React event system.</p>
+      <pre><code>
+Event handler ≠ render function
+      </code></pre>
+      <p>Render должен быть чистым. Event handler выполняется в ответ на действие пользователя и может иметь side effects.</p>
+      <pre><code>
+onClick={handleClick} ≠ onClick={handleClick()}
+      </code></pre>
+      <p>В первом случае функция передана как handler. Во втором она вызвана во время render.</p>
+      <pre><code>
+setState ≠ немедленно изменить переменную state
+      </code></pre>
+      <p>Setter запрашивает следующий render. Текущий handler продолжает видеть state snapshot из текущего render-а.</p>
+      <pre><code>
+setState ≠ DOM mutation
+      </code></pre>
+      <p>Setter ставит update в очередь. DOM меняется только позже, на commit phase, если изменения действительно есть.</p>
+      <pre><code>
+setCount(count + 1) × 3 ≠ +3
+      </code></pre>
+      <p>Если <code>count</code> в текущем snapshot равен <code>0</code>, три таких вызова ставят три замены на <code>1</code>.</p>
+      <pre><code>
+setCount(c =&gt; c + 1) × 3 = +3
+      </code></pre>
+      <p>Updater functions применяются последовательно к pending state во время обработки очереди.</p>
+      <pre><code>
+stopPropagation ≠ preventDefault
+      </code></pre>
+      <p><code>stopPropagation</code> останавливает распространение события по React tree. <code>preventDefault</code> отменяет стандартное браузерное действие.</p>
+      <pre><code>
+Batching ≠ scheduling
+      </code></pre>
+      <p>Batching группирует updates. Scheduling решает, как и когда выполнять React work. Это следующий этап.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>Источники</h2>
+      <h3>React</h3>
+      <p>* <a href="https://react.dev/learn/responding-to-events">React docs — Responding to Events</a></p>
+      <p>* <a href="https://react.dev/reference/react-dom/components/common#react-event-object">React docs — Common components: React event object</a></p>
+      <p>* <a href="https://react.dev/learn/state-as-a-snapshot">React docs — State as a Snapshot</a></p>
+      <p>* <a href="https://react.dev/learn/queueing-a-series-of-state-updates">React docs — Queueing a Series of State Updates</a></p>
+      <p>* <a href="https://react.dev/reference/react/useState">React docs — useState</a></p>
+      <p>* <a href="https://react.dev/reference/react/useReducer">React docs — useReducer</a></p>
+      <p>* <a href="https://react.dev/learn/updating-objects-in-state">React docs — Updating Objects in State</a></p>
+      <p>* <a href="https://react.dev/blog/2022/03/08/react-18-upgrade-guide#automatic-batching">React 18 Upgrade Guide — Automatic Batching</a></p>
+      <p>* <a href="https://react.dev/reference/react-dom/flushSync">React docs — flushSync</a></p>
+      <h3>Browser / DOM</h3>
+      <p>* <a href="https://developer.mozilla.org/en-US/docs/Web/API/Event">MDN — Event</a></p>
+      <p>* <a href="https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener">MDN — EventTarget.addEventListener</a></p>
+      <p>* <a href="https://developer.mozilla.org/en-US/docs/Web/API/Event/stopPropagation">MDN — Event.stopPropagation</a></p>
+      <p>* <a href="https://developer.mozilla.org/en-US/docs/Web/API/Event/preventDefault">MDN — Event.preventDefault</a></p>
+    </section>
+  </main>
+</body>
+</html>
