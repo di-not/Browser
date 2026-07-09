@@ -1,0 +1,1146 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Что может вызвать re-render в React и как избегать лишних re-render-ов</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>Что может вызвать re-render в React и как избегать лишних re-render-ов</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Коротко</h2>
+      <p>В React “перерисовка” в разговорной речи обычно означает <strong>re-render</strong>: React снова вызывает компонент, чтобы вычислить, каким должен быть UI. Это не то же самое, что браузерный <code>Paint</code>, и не то же самое, что DOM mutation.</p>
+      <p>Базовая формула:</p>
+      <pre><code>
+React re-render
+→ React снова вызывает компонент
+→ компонент возвращает новый JSX snapshot
+→ React сравнивает новый результат с предыдущим
+→ если есть отличия, позже на commit phase React применит изменения к DOM
+      </code></pre>
+      <p>Поэтому важно разделять:</p>
+      <pre><code>
+re-render компонента
+≠
+DOM точно изменился
+
+DOM mutation
+≠
+браузер уже нарисовал пиксели
+
+browser paint
+≠
+React render phase
+      </code></pre>
+      <p>Главные причины re-render-а:</p>
+      <pre><code>
+state update
+dispatch из useReducer
+re-render родителя
+новые props
+изменение context
+изменение external store snapshot
+изменение key/type, приводящее к remount
+state update из Effect
+setState во время render в редком разрешённом паттерне
+class setState / forceUpdate
+root render со стороны React DOM
+development-only проверки Strict Mode
+      </code></pre>
+      <p>Главный принцип оптимизации:</p>
+      <blockquote>
+        <p>Не нужно пытаться убрать каждый re-render. Re-render сам по себе не всегда проблема. Оптимизировать стоит там, где есть измеримая задержка, лишняя работа дорогого поддерева или цепочки обновлений.</p>
+      </blockquote>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Что именно считать “перерисовкой”</h2>
+      <p>В React есть несколько разных уровней, которые часто смешивают.</p>
+      <h3>React render</h3>
+      <p>React render — это вызов компонентов React, чтобы понять, что должно быть на экране.</p>
+      <pre><code>
+function Profile({ name }: { name: string }) {
+  return &lt;h1&gt;{name}&lt;/h1&gt;;
+}
+      </code></pre>
+      <p>Когда React вызывает <code>Profile</code> снова, это re-render компонента.</p>
+      <h3>React commit</h3>
+      <p>Commit phase — этап, где React применяет найденные изменения к DOM.</p>
+      <pre><code>
+render phase
+→ React вычислил следующий UI
+
+commit phase
+→ React применил DOM mutations, если они нужны
+      </code></pre>
+      <h3>Browser render pipeline</h3>
+      <p>После DOM mutations браузер может выполнить свою визуальную работу:</p>
+      <pre><code>
+Style
+→ Layout
+→ Paint
+→ Composite
+      </code></pre>
+      <p>Это уже браузерная часть, а не React render phase.</p>
+      <p>Поэтому в статье слово “re-render” означает именно повторный вызов компонента React, а не repaint пикселей.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>2. State update через `useState`</h2>
+      <p>Самая прямая причина re-render-а — вызов setter-функции из <code>useState</code>.</p>
+      <pre><code>
+import { useState } from 'react';
+
+export function Counter() {
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    setCount(count + 1);
+  }
+
+  return &lt;button onClick={handleClick}&gt;{count}&lt;/button&gt;;
+}
+      </code></pre>
+      <p>Когда вызывается <code>setCount</code>, React получает запрос обновить state и render-ит компонент снова с новым значением.</p>
+      <p>Важно:</p>
+      <pre><code>
+setCount(...)
+→ не меняет переменную count внутри уже выполняющегося handler-а
+→ ставит update для следующего render-а
+      </code></pre>
+      <p>Если внутри handler-а после <code>setCount</code> прочитать <code>count</code>, там всё ещё будет старое значение из текущего render snapshot.</p>
+      <h3>Как избежать лишних re-render-ов при state update</h3>
+      <p><strong>Не хранить в state то, что можно вычислить во время render</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+function FullName({ firstName, lastName }: Props) {
+  const [fullName, setFullName] = useState('');
+
+  useEffect(() =&gt; {
+    setFullName(firstName + ' ' + lastName);
+  }, [firstName, lastName]);
+
+  return &lt;p&gt;{fullName}&lt;/p&gt;;
+}
+      </code></pre>
+      <p>Здесь props изменились → компонент отрендерился → Effect вызвал <code>setFullName</code> → компонент отрендерился ещё раз.</p>
+      <p>Лучше:</p>
+      <pre><code>
+function FullName({ firstName, lastName }: Props) {
+  const fullName = firstName + ' ' + lastName;
+  return &lt;p&gt;{fullName}&lt;/p&gt;;
+}
+      </code></pre>
+      <p>State нужен для данных, которые React должен помнить между render-ами и которые не могут быть просто вычислены из текущих props/state.</p>
+      <p><strong>Не обновлять state, если значение не изменилось</strong></p>
+      <p>React сравнивает новое значение state с текущим через <code>Object.is</code>. Если значение идентично, React может пропустить re-render компонента и его children как оптимизацию.</p>
+      <pre><code>
+setCount(count); // обычно не приведёт к полезному обновлению
+      </code></pre>
+      <p>Для объектов и массивов это особенно важно:</p>
+      <pre><code>
+Object.is({}, {}) // false
+      </code></pre>
+      <p>Даже если два объекта выглядят одинаково, это разные ссылки.</p>
+      <p><strong>Держать state ближе к месту использования</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+function App() {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    &lt;&gt;
+      &lt;BigTree /&gt;
+      &lt;Card hovered={hovered} onHoverChange={setHovered} /&gt;
+    &lt;/&gt;
+  );
+}
+      </code></pre>
+      <p>Если transient state поднят слишком высоко, re-render родителя может затрагивать слишком большое поддерево.</p>
+      <p>Лучше держать такой state внутри <code>Card</code>, если он не нужен выше:</p>
+      <pre><code>
+function Card() {
+  const [hovered, setHovered] = useState(false);
+  return &lt;div onMouseEnter={() =&gt; setHovered(true)} /&gt;;
+}
+      </code></pre>
+      <p><strong>Сгруппировать связанные state-переменные</strong></p>
+      <p>Если две переменные всегда обновляются вместе, можно хранить их как один state-объект или reducer-state. Это не всегда уменьшает число render-ов из-за batching, но часто упрощает модель и уменьшает вероятность цепочек синхронизации через Effects.</p>
+      <p>Плохо:</p>
+      <pre><code>
+const [x, setX] = useState(0);
+const [y, setY] = useState(0);
+
+function move(point: Point) {
+  setX(point.x);
+  setY(point.y);
+}
+      </code></pre>
+      <p>В React 18 эти updates обычно batch-ятся, но иногда модель лучше выразить как одно состояние:</p>
+      <pre><code>
+const [position, setPosition] = useState({ x: 0, y: 0 });
+
+function move(point: Point) {
+  setPosition({ x: point.x, y: point.y });
+}
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>3. `dispatch` через `useReducer`</h2>
+      <p><code>useReducer</code> тоже вызывает re-render, когда <code>dispatch</code> приводит к новому state.</p>
+      <pre><code>
+import { useReducer } from 'react';
+
+type State = { count: number };
+type Action = { type: 'increment' } | { type: 'reset' };
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'increment':
+      return { count: state.count + 1 };
+    case 'reset':
+      return { count: 0 };
+  }
+}
+
+export function Counter() {
+  const [state, dispatch] = useReducer(reducer, { count: 0 });
+
+  return (
+    &lt;button onClick={() =&gt; dispatch({ type: 'increment' })}&gt;
+      {state.count}
+    &lt;/button&gt;
+  );
+}
+      </code></pre>
+      <p><code>dispatch</code> похож на setter из <code>useState</code>: он ставит update, React позже вызывает reducer, получает next state и render-ит компонент с новым state.</p>
+      <p>Если reducer вернул то же значение state по <code>Object.is</code>, React может пропустить re-render как оптимизацию.</p>
+      <h3>Как избежать лишних re-render-ов при `useReducer`</h3>
+      <p><strong>Reducer должен возвращать старый state, если изменений нет</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+function reducer(state: State, action: Action): State {
+  if (action.type === 'noop') {
+    return { ...state };
+  }
+
+  return state;
+}
+      </code></pre>
+      <p><code>{ ...state }</code> создаёт новый объект, поэтому для React это новое значение.</p>
+      <p>Лучше:</p>
+      <pre><code>
+function reducer(state: State, action: Action): State {
+  if (action.type === 'noop') {
+    return state;
+  }
+
+  return state;
+}
+      </code></pre>
+      <p><strong>Не мутировать state внутри reducer</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+function reducer(state: State, action: Action): State {
+  state.count++;
+  return state;
+}
+      </code></pre>
+      <p>Здесь ссылка на объект та же. React может не увидеть полезного изменения, а логика становится нечистой.</p>
+      <p>Лучше:</p>
+      <pre><code>
+function reducer(state: State, action: Action): State {
+  return { count: state.count + 1 };
+}
+      </code></pre>
+      <p><strong>Использовать reducer для сложной логики, а не для всего подряд</strong></p>
+      <p><code>useReducer</code> полезен, когда много связанных переходов состояния. Если state простой, <code>useState</code> обычно понятнее. Избыточный reducer не уменьшает re-render-ы сам по себе.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>4. Re-render родителя</h2>
+      <p>По умолчанию, когда компонент re-render-ится, React re-render-ит и его дочерние компоненты.</p>
+      <pre><code>
+function Parent() {
+  const [count, setCount] = useState(0);
+
+  return (
+    &lt;&gt;
+      &lt;button onClick={() =&gt; setCount(count + 1)}&gt;
+        {count}
+      &lt;/button&gt;
+      &lt;ExpensiveChild /&gt;
+    &lt;/&gt;
+  );
+}
+      </code></pre>
+      <p>При изменении <code>count</code> re-render-ится <code>Parent</code>. <code>ExpensiveChild</code> тоже может быть вызван снова, даже если он не использует <code>count</code>.</p>
+      <p>Это нормально: React снова вычисляет UI поддерева. Если результат не изменился, DOM может остаться прежним.</p>
+      <h3>Как избежать лишних re-render-ов из-за родителя</h3>
+      <p><strong>Держать state ниже</strong></p>
+      <p>Если state нужен только маленькой части, переместить его в эту часть.</p>
+      <p>Плохо:</p>
+      <pre><code>
+function Page() {
+  const [input, setInput] = useState('');
+
+  return (
+    &lt;&gt;
+      &lt;Header /&gt;
+      &lt;Sidebar /&gt;
+      &lt;SearchBox value={input} onChange={setInput} /&gt;
+      &lt;BigContent /&gt;
+    &lt;/&gt;
+  );
+}
+      </code></pre>
+      <p>Лучше:</p>
+      <pre><code>
+function Page() {
+  return (
+    &lt;&gt;
+      &lt;Header /&gt;
+      &lt;Sidebar /&gt;
+      &lt;SearchBox /&gt;
+      &lt;BigContent /&gt;
+    &lt;/&gt;
+  );
+}
+
+function SearchBox() {
+  const [input, setInput] = useState('');
+  return &lt;input value={input} onChange={e =&gt; setInput(e.target.value)} /&gt;;
+}
+      </code></pre>
+      <p>Теперь ввод в <code>SearchBox</code> не заставляет <code>Page</code> снова вычислять всё дерево из-за этого state.</p>
+      <p><strong>Использовать композицию через `children`</strong></p>
+      <p>Если компонент-обёртка имеет свой локальный state, но визуально содержит большое поддерево, можно передать поддерево как <code>children</code>.</p>
+      <pre><code>
+function Panel({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    &lt;section&gt;
+      &lt;button onClick={() =&gt; setOpen(o =&gt; !o)}&gt;Toggle&lt;/button&gt;
+      {open &amp;&amp; children}
+    &lt;/section&gt;
+  );
+}
+      </code></pre>
+      <p>Так React лучше понимает, что <code>children</code> не зависят от локального state обёртки, если они были созданы выше.</p>
+      <p><strong>Использовать `memo` для дорогих дочерних компонентов</strong></p>
+      <pre><code>
+const ExpensiveChild = memo(function ExpensiveChild({ value }: { value: string }) {
+  return &lt;SlowList value={value} /&gt;;
+});
+      </code></pre>
+      <p><code>memo</code> говорит React: если props не изменились, компонент обычно можно не re-render-ить при re-render-е родителя.</p>
+      <p>Ограничения:</p>
+      <pre><code>
+memo — оптимизация, не гарантия
+memo не блокирует own state updates
+memo не блокирует context updates, которые компонент сам читает
+props сравниваются shallow через Object.is, если не передан custom compare
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>5. Props изменились</h2>
+      <p>Компонент может re-render-иться, когда получает новые props от родителя.</p>
+      <pre><code>
+function Parent() {
+  const [name, setName] = useState('Ada');
+  return &lt;Greeting name={name} /&gt;;
+}
+
+function Greeting({ name }: { name: string }) {
+  return &lt;h1&gt;Hello, {name}&lt;/h1&gt;;
+}
+      </code></pre>
+      <p>Если <code>name</code> изменился, <code>Greeting</code> должен получить новый props и вычислить новый UI.</p>
+      <p>Тонкость: для обычного компонента без <code>memo</code> сам факт re-render-а родителя уже обычно приводит к re-render-у child. Но при оптимизации через <code>memo</code> именно изменение props становится критерием, по которому React решает, можно ли пропустить re-render child.</p>
+      <h3>Как избежать лишних re-render-ов из-за props</h3>
+      <p><strong>Передавать минимальные props</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+&lt;Profile person={person} /&gt;
+      </code></pre>
+      <p>если <code>person</code> пересоздаётся часто, хотя child нужен только <code>name</code>.</p>
+      <p>Лучше:</p>
+      <pre><code>
+&lt;Profile name={person.name} /&gt;
+      </code></pre>
+      <p>Примитивные props проще сравнивать и легче стабилизировать.</p>
+      <p><strong>Не создавать новые объекты и массивы без необходимости</strong></p>
+      <p>Плохо для memoized child:</p>
+      <pre><code>
+const Child = memo(function Child({ options }: { options: Options }) {
+  return &lt;Chart options={options} /&gt;;
+});
+
+function Parent() {
+  return &lt;Child options={{ theme: 'dark' }} /&gt;;
+}
+      </code></pre>
+      <p>На каждом render-е создаётся новый объект.</p>
+      <p>Лучше:</p>
+      <pre><code>
+const options = useMemo(() =&gt; ({ theme: 'dark' }), []);
+
+return &lt;Child options={options} /&gt;;
+      </code></pre>
+      <p>Или ещё лучше — передать отдельные примитивы, если возможно:</p>
+      <pre><code>
+&lt;Child theme="dark" /&gt;
+      </code></pre>
+      <p><strong>Стабилизировать функции через `useCallback`, когда они ломают memo</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+const ProductList = memo(function ProductList({ onBuy }: Props) {
+  // ...
+});
+
+function Page({ productId }: { productId: string }) {
+  return (
+    &lt;ProductList
+      onBuy={() =&gt; {
+        buy(productId);
+      }}
+    /&gt;
+  );
+}
+      </code></pre>
+      <p>Каждый render создаёт новую функцию, поэтому <code>memo</code> у child не поможет.</p>
+      <p>Лучше:</p>
+      <pre><code>
+const handleBuy = useCallback(() =&gt; {
+  buy(productId);
+}, [productId]);
+
+return &lt;ProductList onBuy={handleBuy} /&gt;;
+      </code></pre>
+      <p><code>useCallback</code> нужен не “для всех функций”, а когда стабильная ссылка действительно важна: например, функция передаётся memoized child или используется как dependency другого Hook.</p>
+      <p><strong>Использовать `useMemo` для дорогих вычислений</strong></p>
+      <p>Если re-render неизбежен, можно не повторять дорогую чистую калькуляцию при неизменных dependencies.</p>
+      <pre><code>
+const visibleTodos = useMemo(
+  () =&gt; filterTodos(todos, tab),
+  [todos, tab]
+);
+      </code></pre>
+      <p>Это не предотвращает re-render компонента. Это предотвращает повторное выполнение дорогой калькуляции внутри re-render-а, пока dependencies не изменились.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>6. Изменение context</h2>
+      <p>Компонент, который читает context через <code>useContext</code>, re-render-ится, когда значение ближайшего Provider для этого context меняется.</p>
+      <pre><code>
+const ThemeContext = createContext('light');
+
+function Button() {
+  const theme = useContext(ThemeContext);
+  return &lt;button className={theme}&gt;Save&lt;/button&gt;;
+}
+      </code></pre>
+      <p>Если Provider получил новое <code>value</code>, React re-render-ит consumers, которые читают этот context. Значения сравниваются через <code>Object.is</code>.</p>
+      <p>Важно:</p>
+      <pre><code>
+memo не блокирует re-render из-за context,
+если memoized component сам читает этот context
+      </code></pre>
+      <h3>Частый источник лишних context re-render-ов</h3>
+      <p>Плохо:</p>
+      <pre><code>
+function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+
+  function login(response: Response) {
+    setCurrentUser(response.user);
+  }
+
+  return (
+    &lt;AuthContext value={{ currentUser, login }}&gt;
+      &lt;Page /&gt;
+    &lt;/AuthContext&gt;
+  );
+}
+      </code></pre>
+      <p>На каждом render-е <code>App</code> создаёт новый объект и новую функцию. Для context это новое <code>value</code>, поэтому consumers могут re-render-иться.</p>
+      <h3>Как избежать лишних context re-render-ов</h3>
+      <p><strong>Мемоизировать объект Provider value</strong></p>
+      <pre><code>
+const login = useCallback((response: Response) =&gt; {
+  setCurrentUser(response.user);
+}, []);
+
+const authValue = useMemo(
+  () =&gt; ({ currentUser, login }),
+  [currentUser, login]
+);
+
+return (
+  &lt;AuthContext value={authValue}&gt;
+    &lt;Page /&gt;
+  &lt;/AuthContext&gt;
+);
+      </code></pre>
+      <p><strong>Разделять contexts</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+&lt;AppContext value={{ theme, currentUser, locale, permissions }}&gt;
+  &lt;App /&gt;
+&lt;/AppContext&gt;
+      </code></pre>
+      <p>Любое изменение одного поля меняет весь объект context value.</p>
+      <p>Лучше разделить по независимым областям:</p>
+      <pre><code>
+&lt;ThemeContext value={theme}&gt;
+  &lt;AuthContext value={authValue}&gt;
+    &lt;LocaleContext value={locale}&gt;
+      &lt;App /&gt;
+    &lt;/LocaleContext&gt;
+  &lt;/AuthContext&gt;
+&lt;/ThemeContext&gt;
+      </code></pre>
+      <p>Тогда компонент, читающий только theme, не обязан re-render-иться из-за изменения auth.</p>
+      <p><strong>Разделить consumer на внешний и memoized child</strong></p>
+      <p>Если компоненту нужна только часть context, можно прочитать context во внешнем компоненте, а в memoized child передать минимальный prop.</p>
+      <pre><code>
+function GreetingContainer() {
+  const theme = useContext(ThemeContext);
+  return &lt;Greeting theme={theme} name="Ada" /&gt;;
+}
+
+const Greeting = memo(function Greeting({
+  theme,
+  name,
+}: {
+  theme: string;
+  name: string;
+}) {
+  return &lt;h1 className={theme}&gt;Hello, {name}&lt;/h1&gt;;
+});
+      </code></pre>
+      <p>Это помогает, когда большой child не должен зависеть от всего context.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>7. Изменение external store snapshot</h2>
+      <p>Если компонент подписан на внешний store через <code>useSyncExternalStore</code>, React может re-render-ить его при изменении snapshot.</p>
+      <pre><code>
+const todos = useSyncExternalStore(
+  todosStore.subscribe,
+  todosStore.getSnapshot
+);
+      </code></pre>
+      <p>React вызывает <code>subscribe</code>, чтобы подписаться на store. Когда store меняется, callback уведомляет React. React снова вызывает <code>getSnapshot</code>. Если новый snapshot отличается от предыдущего через <code>Object.is</code>, компонент re-render-ится.</p>
+      <p>Примеры external store:</p>
+      <pre><code>
+Redux-подобный store
+Zustand-подобный store
+самописная подписка
+browser API с mutable value и events
+      </code></pre>
+      <h3>Как избежать лишних re-render-ов из external store</h3>
+      <p><strong>Возвращать стабильный snapshot, если данные не изменились</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+function getSnapshot() {
+  return { todos: store.todos };
+}
+      </code></pre>
+      <p>Каждый вызов возвращает новый объект.</p>
+      <p>Лучше кэшировать snapshot и возвращать тот же объект, пока данные не изменились.</p>
+      <pre><code>
+let lastTodos = store.todos;
+let lastSnapshot = { todos: lastTodos };
+
+function getSnapshot() {
+  if (store.todos !== lastTodos) {
+    lastTodos = store.todos;
+    lastSnapshot = { todos: lastTodos };
+  }
+
+  return lastSnapshot;
+}
+      </code></pre>
+      <p><strong>Делать snapshot immutable</strong></p>
+      <p>Если store внутри mutable, snapshot должен отражать изменения безопасно. Иначе React может не заметить изменение или получить несовместимое значение.</p>
+      <p><strong>Не пересоздавать `subscribe` внутри компонента без необходимости</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+function Todos() {
+  const todos = useSyncExternalStore(
+    callback =&gt; todosStore.subscribe(callback),
+    todosStore.getSnapshot
+  );
+
+  return &lt;List todos={todos} /&gt;;
+}
+      </code></pre>
+      <p>Функция <code>subscribe</code> создаётся заново на каждом render-е. React может переподписываться.</p>
+      <p>Лучше вынести:</p>
+      <pre><code>
+const subscribe = (callback: () =&gt; void) =&gt; {
+  return todosStore.subscribe(callback);
+};
+
+function Todos() {
+  const todos = useSyncExternalStore(
+    subscribe,
+    todosStore.getSnapshot
+  );
+
+  return &lt;List todos={todos} /&gt;;
+}
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>8. Изменение `key` или типа компонента</h2>
+      <p>Изменение <code>key</code> или типа компонента — это не обычный re-render. Это может привести к remount: React удаляет старый компонент в этой позиции и создаёт новый. State при этом сбрасывается.</p>
+      <p>Пример намеренного reset:</p>
+      <pre><code>
+function ProfilePage({ userId }: { userId: string }) {
+  return &lt;ProfileForm key={userId} userId={userId} /&gt;;
+}
+      </code></pre>
+      <p>Когда <code>userId</code> изменится, <code>ProfileForm</code> будет создан заново, и его state сбросится.</p>
+      <h3>Как случайно вызвать remount</h3>
+      <p><strong>Менять key без необходимости</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+&lt;Item key={Math.random()} /&gt;
+      </code></pre>
+      <p>Каждый render создаёт новый key, React считает это новым компонентом.</p>
+      <p>Лучше:</p>
+      <pre><code>
+&lt;Item key={item.id} /&gt;
+      </code></pre>
+      <p><strong>Определять компонент внутри другого компонента</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+function Parent() {
+  function Child() {
+    return &lt;input /&gt;;
+  }
+
+  return &lt;Child /&gt;;
+}
+      </code></pre>
+      <p>На каждом render-е <code>Parent</code> создаётся новая функция <code>Child</code>. React может воспринимать это как новый тип компонента в этой позиции, из-за чего state child будет сбрасываться.</p>
+      <p>Лучше:</p>
+      <pre><code>
+function Child() {
+  return &lt;input /&gt;;
+}
+
+function Parent() {
+  return &lt;Child /&gt;;
+}
+      </code></pre>
+      <h3>Как избегать лишних remount</h3>
+      <pre><code>
+использовать стабильные keys
+не использовать Math.random() / Date.now() как key
+не менять key, если не нужен reset state
+не определять компонентные функции внутри других компонентов
+сохранять одинаковый тип компонента в той же позиции дерева
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>9. Effect вызывает state update</h2>
+      <p><code>useEffect</code> сам по себе не re-render-ит компонент. Но если внутри Effect вызвать <code>setState</code>, это создаст новый update.</p>
+      <p>Плохо:</p>
+      <pre><code>
+function ProductList({ products, filter }: Props) {
+  const [visibleProducts, setVisibleProducts] = useState([]);
+
+  useEffect(() =&gt; {
+    setVisibleProducts(filterProducts(products, filter));
+  }, [products, filter]);
+
+  return &lt;List items={visibleProducts} /&gt;;
+}
+      </code></pre>
+      <p>Здесь происходит лишняя цепочка:</p>
+      <pre><code>
+props изменились
+→ render со старым visibleProducts
+→ commit
+→ Effect
+→ setVisibleProducts
+→ второй render
+      </code></pre>
+      <p>Лучше:</p>
+      <pre><code>
+function ProductList({ products, filter }: Props) {
+  const visibleProducts = filterProducts(products, filter);
+  return &lt;List items={visibleProducts} /&gt;;
+}
+      </code></pre>
+      <p>Если фильтрация дорогая:</p>
+      <pre><code>
+const visibleProducts = useMemo(
+  () =&gt; filterProducts(products, filter),
+  [products, filter]
+);
+      </code></pre>
+      <h3>Как избегать лишних re-render-ов из Effects</h3>
+      <p><strong>Удалять Effects, которые только синхронизируют derived state</strong></p>
+      <p>Если значение можно вычислить из текущих props/state во время render, Effect не нужен.</p>
+      <p><strong>Переносить action-specific логику в event handler</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+useEffect(() =&gt; {
+  if (isSubmitted) {
+    sendAnalytics();
+  }
+}, [isSubmitted]);
+      </code></pre>
+      <p>Лучше:</p>
+      <pre><code>
+function handleSubmit() {
+  sendAnalytics();
+  setSubmitted(true);
+}
+      </code></pre>
+      <p>Если действие вызвано конкретным событием пользователя, часто логика должна быть в handler-е, а не в Effect.</p>
+      <p><strong>Разделять независимые Effects</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+useEffect(() =&gt; {
+  connectChat(roomId);
+  logVisit(pageId);
+}, [roomId, pageId]);
+      </code></pre>
+      <p>Если <code>pageId</code> изменился, effect переподключит чат, хотя чат зависит только от <code>roomId</code>.</p>
+      <p>Лучше:</p>
+      <pre><code>
+useEffect(() =&gt; {
+  return connectChat(roomId);
+}, [roomId]);
+
+useEffect(() =&gt; {
+  logVisit(pageId);
+}, [pageId]);
+      </code></pre>
+      <p><strong>Убирать лишние object/function dependencies</strong></p>
+      <p>Плохо:</p>
+      <pre><code>
+const options = { roomId };
+
+useEffect(() =&gt; {
+  const connection = createConnection(options);
+  connection.connect();
+  return () =&gt; connection.disconnect();
+}, [options]);
+      </code></pre>
+      <p><code>options</code> новый на каждом render-е, значит effect будет re-run-иться.</p>
+      <p>Лучше создать объект внутри Effect:</p>
+      <pre><code>
+useEffect(() =&gt; {
+  const options = { roomId };
+  const connection = createConnection(options);
+  connection.connect();
+  return () =&gt; connection.disconnect();
+}, [roomId]);
+      </code></pre>
+      <p>Или стабилизировать через <code>useMemo</code>, если объект нужен ещё где-то.</p>
+      <p><strong>Использовать ref для данных, которые не должны влиять на UI</strong></p>
+      <p>Если значение нужно хранить между render-ами, но его изменение не должно re-render-ить компонент, можно использовать <code>useRef</code>.</p>
+      <pre><code>
+const lastClickTimeRef = useRef&lt;number | null&gt;(null);
+
+function handleClick() {
+  lastClickTimeRef.current = Date.now();
+}
+      </code></pre>
+      <p>Изменение <code>ref.current</code> не вызывает re-render.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>10. `setState` во время render</h2>
+      <p>Обычно вызывать <code>setState</code> во время render нельзя. Но React допускает редкий паттерн: вызвать setter во время render текущего компонента, чтобы сохранить информацию о предыдущих render-ах. React отбросит текущий output и сразу попробует render снова с новым state.</p>
+      <p>Пример из практического смысла:</p>
+      <pre><code>
+function CountLabel({ count }: { count: number }) {
+  const [prevCount, setPrevCount] = useState(count);
+  const [trend, setTrend] = useState&lt;'up' | 'down' | null&gt;(null);
+
+  if (prevCount !== count) {
+    setPrevCount(count);
+    setTrend(count &gt; prevCount ? 'up' : 'down');
+  }
+
+  return (
+    &lt;p&gt;
+      {count} {trend}
+    &lt;/p&gt;
+  );
+}
+      </code></pre>
+      <p>Это редкий паттерн. В большинстве случаев лучше вычислять значение во время render или использовать key для reset.</p>
+      <h3>Как избегать лишних render retry</h3>
+      <pre><code>
+не вызывать setState во время render без необходимости
+не синхронизировать props в state через Effect, если можно вычислить во время render
+использовать key для намеренного reset state
+проверять условие перед setState, иначе можно получить бесконечный цикл
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>11. `root.render`</h2>
+      <p>На уровне React DOM можно явно вызвать render root-а:</p>
+      <pre><code>
+const root = createRoot(document.getElementById('root')!);
+root.render(&lt;App /&gt;);
+      </code></pre>
+      <p>При повторном вызове <code>root.render</code> React обновляет root tree, сравнивая новый React tree с предыдущим. В обычном приложении фреймворк или bootstrap-код вызывает root render, а внутри UI обновления обычно идут через state/context/store.</p>
+      <p>Это причина re-render-а на уровне корня, но в повседневном компонентном коде она встречается реже, чем state/props/context.</p>
+      <h3>Как избегать лишних root render</h3>
+      <pre><code>
+не вызывать root.render в цикле или на каждое внешнее событие без необходимости
+подключать внешние данные через useSyncExternalStore или state management
+оставить root.render для bootstrap / смены верхнеуровневого tree
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>12. Strict Mode в development</h2>
+      <p><code>&lt;StrictMode&gt;</code> может вызвать дополнительные render-вызовы в development. Это нужно, чтобы найти нечистые компоненты, неправильные Effects и проблемы с ref callbacks.</p>
+      <p>Пример:</p>
+      <pre><code>
+&lt;StrictMode&gt;
+  &lt;App /&gt;
+&lt;/StrictMode&gt;
+      </code></pre>
+      <p>В development React может вызвать компонентную функцию дважды. Это не production-поведение и не причина оптимизировать компонент через <code>memo</code>.</p>
+      <p>Правильная реакция:</p>
+      <pre><code>
+не убирать Strict Mode ради “меньше render-ов”
+сделать render logic чистой
+убрать мутации props/state
+правильно реализовать cleanup Effects
+      </code></pre>
+      <p>Если компонент ломается от повторного вызова, это признак нечистой логики.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>13. Что не вызывает re-render само по себе</h2>
+      <h3>Изменение `ref.current`</h3>
+      <pre><code>
+const countRef = useRef(0);
+
+function handleClick() {
+  countRef.current++;
+}
+      </code></pre>
+      <p>Изменение ref не вызывает re-render. Если значение должно отображаться на экране, нужен state.</p>
+      <h3>Изменение локальной переменной</h3>
+      <pre><code>
+let count = 0;
+
+function handleClick() {
+  count++;
+}
+      </code></pre>
+      <p>Локальная переменная не сохраняется между render-ами и не сообщает React, что нужно render-ить компонент снова.</p>
+      <h3>Мутация объекта state без setter</h3>
+      <p>Плохо:</p>
+      <pre><code>
+const [person, setPerson] = useState({ name: 'Ada' });
+
+function rename() {
+  person.name = 'Grace';
+}
+      </code></pre>
+      <p>React не получает update. Нужно создать новый объект и передать его в setter:</p>
+      <pre><code>
+setPerson({
+  ...person,
+  name: 'Grace',
+});
+      </code></pre>
+      <h3>Мутация массива state без setter</h3>
+      <p>Плохо:</p>
+      <pre><code>
+items.push(newItem);
+      </code></pre>
+      <p>Лучше:</p>
+      <pre><code>
+setItems([...items, newItem]);
+      </code></pre>
+      <h3>Ручное изменение DOM</h3>
+      <pre><code>
+ref.current!.textContent = 'Changed';
+      </code></pre>
+      <p>Ручное изменение DOM не является React state update. Оно может быть перезаписано React на следующем commit. Для UI, которым управляет React, лучше выражать изменения через state/props.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>14. `memo`: когда помогает и когда нет</h2>
+      <p><code>memo</code> помогает пропустить re-render child, когда parent re-render-ится, но props child не изменились.</p>
+      <pre><code>
+const Greeting = memo(function Greeting({ name }: { name: string }) {
+  return &lt;h1&gt;Hello, {name}&lt;/h1&gt;;
+});
+      </code></pre>
+      <p><code>memo</code> полезен, если:</p>
+      <pre><code>
+компонент часто получает те же props
+parent re-render-ится часто
+render child дорогой
+props можно сделать стабильными
+      </code></pre>
+      <p><code>memo</code> не поможет, если:</p>
+      <pre><code>
+сам компонент обновляет собственный state
+компонент читает context, который изменился
+props каждый раз новые по ссылке
+render дешёвый и нет заметной проблемы
+      </code></pre>
+      <h3>Custom compare</h3>
+      <pre><code>
+const Chart = memo(ChartImpl, (prevProps, nextProps) =&gt; {
+  return prevProps.dataPoints.length === nextProps.dataPoints.length;
+});
+      </code></pre>
+      <p>Custom compare опасен, если он не сравнивает все props, включая функции. Функции часто закрывают старые props/state, и неправильное сравнение может привести к stale closures.</p>
+      <p>Использовать custom compare стоит только тогда, когда сравнение реально дешевле render-а и корректность легко доказать.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>15. `useMemo`: что он оптимизирует</h2>
+      <p><code>useMemo</code> кэширует результат вычисления между re-render-ами.</p>
+      <pre><code>
+const visibleTodos = useMemo(
+  () =&gt; filterTodos(todos, tab),
+  [todos, tab]
+);
+      </code></pre>
+      <p>Он помогает:</p>
+      <pre><code>
+не повторять дорогую чистую калькуляцию
+сохранять стабильную ссылку на объект/массив для memoized child
+сохранять стабильную dependency для другого Hook
+      </code></pre>
+      <p>Он не делает компонент “не re-render-ящимся”. Компонент всё равно может быть вызван снова. Просто внутри этого вызова React может вернуть кэшированное значение.</p>
+      <p>Не нужно оборачивать каждую переменную в <code>useMemo</code>. Это добавляет сложность. Начинать лучше с чистой архитектуры state и измерений.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>16. `useCallback`: что он оптимизирует</h2>
+      <p><code>useCallback</code> кэширует определение функции между re-render-ами.</p>
+      <pre><code>
+const handleSubmit = useCallback((orderDetails: OrderDetails) =&gt; {
+  post('/buy', { productId, orderDetails });
+}, [productId]);
+      </code></pre>
+      <p>Он полезен, когда:</p>
+      <pre><code>
+функция передаётся в memoized child
+функция используется как dependency другого Hook
+нужна стабильная ссылка для внешней подписки
+      </code></pre>
+      <p>Он не предотвращает создание логики вообще и не ускоряет автоматически каждый компонент. Если child не memoized и функция не dependency, <code>useCallback</code> часто не даёт пользы.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>17. React Compiler</h2>
+      <p>React Compiler может автоматически применять часть мемоизации, уменьшая необходимость ручных <code>memo</code>, <code>useMemo</code> и <code>useCallback</code>. Но это не отменяет базовую модель:</p>
+      <pre><code>
+state/props/context/store updates
+→ могут вызвать re-render
+
+чистый render
+→ обязателен
+
+лишние derived state Effects
+→ всё ещё плохая модель
+
+измерение производительности
+→ всё ещё важно
+      </code></pre>
+      <p>Если проект не использует React Compiler или использует его частично, обычные правила оптимизации остаются актуальными.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>18. Как диагностировать лишние re-render-ы</h2>
+      <h3>React DevTools Profiler</h3>
+      <p>Использовать Profiler, если взаимодействие заметно тормозит. Он показывает, какие части дерева render-ились и сколько времени это заняло.</p>
+      <h3>`&lt;Profiler&gt;`</h3>
+      <p>Для программного измерения можно использовать компонент <code>&lt;Profiler&gt;</code>:</p>
+      <pre><code>
+&lt;Profiler id="SearchResults" onRender={onRender}&gt;
+  &lt;SearchResults /&gt;
+&lt;/Profiler&gt;
+      </code></pre>
+      <p>Callback получает информацию о commit-е и времени render-а. Это инструмент измерения, а не способ оптимизации сам по себе.</p>
+      <h3>Локальный `console.log`</h3>
+      <p>Для учебного анализа можно временно поставить:</p>
+      <pre><code>
+console.log('Render ExpensiveChild');
+      </code></pre>
+      <p>Но на него нельзя слепо полагаться в development, потому что Strict Mode может вызывать render дважды.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>19. Что важно не перепутать</h2>
+      <pre><code>
+re-render ≠ DOM mutation
+      </code></pre>
+      <p>Компонент может быть вызван снова, но React может не изменить DOM.</p>
+      <pre><code>
+DOM mutation ≠ browser paint
+      </code></pre>
+      <p>После DOM changes браузер ещё выполняет свой rendering pipeline.</p>
+      <pre><code>
+state update ≠ мгновенное изменение state-переменной
+      </code></pre>
+      <p>Setter обновляет state для следующего render-а.</p>
+      <pre><code>
+same state value может быть skipped
+      </code></pre>
+      <p>Если новое значение идентично текущему через <code>Object.is</code>, React может пропустить re-render как оптимизацию.</p>
+      <pre><code>
+memo ≠ защита от всех re-render-ов
+      </code></pre>
+      <p><code>memo</code> касается props от родителя. Own state и context всё равно могут вызвать re-render.</p>
+      <pre><code>
+useMemo ≠ запрет re-render-а
+      </code></pre>
+      <p><code>useMemo</code> кэширует вычисление, но компонент всё равно может быть вызван.</p>
+      <pre><code>
+useCallback ≠ ускоритель по умолчанию
+      </code></pre>
+      <p>Он полезен, когда важна стабильная ссылка на функцию.</p>
+      <pre><code>
+ref update ≠ re-render
+      </code></pre>
+      <p><code>ref.current</code> можно менять без re-render-а, поэтому ref не подходит для данных, которые должны отображаться на экране.</p>
+      <pre><code>
+key change ≠ обычный re-render
+      </code></pre>
+      <p>Изменение key может сбросить state и создать компонент заново.</p>
+      <pre><code>
+Strict Mode double render ≠ production render
+      </code></pre>
+      <p>Это development-only проверка чистоты.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>20. Итоговая модель</h2>
+      <p>React re-render может начаться, когда React получил сигнал, что входные данные для UI могли измениться:</p>
+      <pre><code>
+state
+props
+context
+external store snapshot
+root tree
+key/type identity
+class forceUpdate
+      </code></pre>
+      <p>Но хороший React-код не пытается вручную запретить все re-render-ы. Он делает другое:</p>
+      <pre><code>
+держит render чистым
+хранит минимальный state
+не дублирует derived data в state
+не создаёт цепочки Effects
+локализует state
+разделяет context
+использует memo/useMemo/useCallback только там, где есть причина
+измеряет performance перед оптимизацией
+      </code></pre>
+      <p>Правильная финальная формула:</p>
+      <pre><code>
+Re-render — это способ React заново вычислить UI.
+Лишним он становится не сам по себе,
+а когда из-за структуры state, props, context или Effects
+React вынужден часто пересчитывать дорогие части дерева без необходимости.
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>Источники</h2>
+      <h3>React</h3>
+      <p>* <a href="https://react.dev/learn/render-and-commit">React docs — Render and Commit</a></p>
+      <p>* <a href="https://react.dev/learn/state-as-a-snapshot">React docs — State as a Snapshot</a></p>
+      <p>* <a href="https://react.dev/learn/state-a-components-memory">React docs — State: A Component's Memory</a></p>
+      <p>* <a href="https://react.dev/learn/queueing-a-series-of-state-updates">React docs — Queueing a Series of State Updates</a></p>
+      <p>* <a href="https://react.dev/reference/react/useState">React docs — useState</a></p>
+      <p>* <a href="https://react.dev/reference/react/useReducer">React docs — useReducer</a></p>
+      <p>* <a href="https://react.dev/reference/react/memo">React docs — memo</a></p>
+      <p>* <a href="https://react.dev/reference/react/useMemo">React docs — useMemo</a></p>
+      <p>* <a href="https://react.dev/reference/react/useCallback">React docs — useCallback</a></p>
+      <p>* <a href="https://react.dev/reference/react/useContext">React docs — useContext</a></p>
+      <p>* <a href="https://react.dev/reference/react/useSyncExternalStore">React docs — useSyncExternalStore</a></p>
+      <p>* <a href="https://react.dev/reference/react/useRef">React docs — useRef</a></p>
+      <p>* <a href="https://react.dev/learn/you-might-not-need-an-effect">React docs — You Might Not Need an Effect</a></p>
+      <p>* <a href="https://react.dev/reference/react/useEffect">React docs — useEffect</a></p>
+      <p>* <a href="https://react.dev/learn/lifecycle-of-reactive-effects">React docs — Lifecycle of Reactive Effects</a></p>
+      <p>* <a href="https://react.dev/learn/removing-effect-dependencies">React docs — Removing Effect Dependencies</a></p>
+      <p>* <a href="https://react.dev/learn/preserving-and-resetting-state">React docs — Preserving and Resetting State</a></p>
+      <p>* <a href="https://react.dev/learn/updating-objects-in-state">React docs — Updating Objects in State</a></p>
+      <p>* <a href="https://react.dev/learn/updating-arrays-in-state">React docs — Updating Arrays in State</a></p>
+      <p>* <a href="https://react.dev/reference/react/Component">React docs — Component</a></p>
+      <p>* <a href="https://react.dev/reference/react/StrictMode">React docs — StrictMode</a></p>
+      <p>* <a href="https://react.dev/reference/react/Profiler">React docs — Profiler</a></p>
+      <p>* <a href="https://react.dev/learn/react-compiler/introduction">React Compiler — Introduction</a></p>
+    </section>
+  </main>
+</body>
+</html>
