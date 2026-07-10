@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>React client update: Scheduling, priority и lanes</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>React client update: Scheduling, priority и lanes</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h3>Коротко</h3>
+      <p>Эта статья разбирает участок после очереди обновлений и batching, но до render/reconciliation:</p>
+      <pre><code>
+Queue update
+→ Batching
+→ Schedule update / priority / lane
+→ Render phase / Reconciliation
+      </code></pre>
+      <p>Главная идея:</p>
+      <blockquote>
+        <p>После того как React получил updates и сгруппировал их, он должен решить, как срочно выполнять работу. Публичная модель React говорит о срочных обновлениях, несрочных Transition-обновлениях и возможности откладывать неважную часть UI. Внутри React эта система связана с приоритетами и lanes, но lanes не являются публичным API приложения.</p>
+      </blockquote>
+      <p>Публичные инструменты, которые относятся к этой теме:</p>
+      <pre><code>
+startTransition
+useTransition
+useDeferredValue
+flushSync
+      </code></pre>
+      <p><code>startTransition</code>, <code>useTransition</code> и <code>useDeferredValue</code> помогают React оставлять интерфейс отзывчивым, когда часть обновления может быть несрочной. <code>flushSync</code> делает противоположное: принудительно заставляет React синхронно сбросить update и обновить DOM, поэтому это редкий инструмент.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>1. Граница статьи</h2>
+      <p>Эта статья начинается здесь:</p>
+      <pre><code>
+Queue update
+→ Batching
+      </code></pre>
+      <p>и заканчивается здесь:</p>
+      <pre><code>
+Schedule update / priority / lane
+→ Render phase / Reconciliation
+      </code></pre>
+      <p>В предыдущей статье React уже получил updates:</p>
+      <pre><code>
+function handleChange(event: React.ChangeEvent&lt;HTMLInputElement&gt;) {
+  setInput(event.target.value);
+  setQuery(event.target.value);
+}
+      </code></pre>
+      <p>React мог сгруппировать эти updates в batch. Теперь ему нужно решить, как выполнять работу дальше.</p>
+      <p>В этой статье не раскрываются подробно:</p>
+      <pre><code>
+Fiber render phase
+Reconciliation
+Bailout
+Commit phase
+DOM mutations
+useLayoutEffect
+useEffect
+Browser render pipeline
+      </code></pre>
+      <p>Они идут после scheduling.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>2. Что значит “schedule update”</h2>
+      <p><code>Schedule update</code> означает, что React получил update и должен поставить работу на выполнение с подходящей срочностью.</p>
+      <p>React не обязан воспринимать все обновления одинаково. Некоторые изменения должны ощущаться мгновенными: ввод в поле, клик по кнопке, переключение checkbox. Другие изменения могут быть менее срочными: фильтрация большого списка, переход между вкладками с тяжёлым содержимым, обновление результатов поиска.</p>
+      <p>Смысловая модель:</p>
+      <pre><code>
+update попал в очередь
+→ updates сгруппированы batching
+→ React определяет срочность работы
+→ React выбирает, когда и какую работу выполнять
+→ начинается render phase
+      </code></pre>
+      <p>Scheduling не равен batching.</p>
+      <pre><code>
+Batching
+→ какие updates обработать вместе
+
+Scheduling
+→ когда и с каким приоритетом выполнять React work
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>3. Почему React нужен scheduler</h2>
+      <p>Если каждое обновление всегда выполнялось бы синхронно и до конца, тяжёлый render мог бы заблокировать главный поток браузера. Пока JavaScript занят, браузер хуже реагирует на ввод, клики и другие действия.</p>
+      <p>React 18 описывает concurrent rendering как механизм, который позволяет React готовить несколько версий UI одновременно, прерывать rendering, продолжать его позже или даже отказаться от начатой работы. Главное свойство concurrent rendering — interruptible rendering: React может начать render, поставить его на паузу, продолжить позже или выбросить незавершённую работу.</p>
+      <p>Для пользователя цель не в том, чтобы “React делал всё медленнее”, а в том, чтобы интерфейс оставался отзывчивым. Например, ввод в поле должен обновляться быстро, даже если связанный список результатов тяжёлый.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>4. Срочные и несрочные обновления</h2>
+      <p>Официальная документация React использует понятие <strong>Transition</strong> для несрочных обновлений.</p>
+      <p>Срочное обновление — это то, что пользователь ожидает увидеть немедленно как прямой отклик на действие.</p>
+      <p>Примеры:</p>
+      <pre><code>
+набранный символ появляется в input
+checkbox меняет checked-состояние
+кнопка визуально нажалась
+локальное раскрытие меню
+      </code></pre>
+      <p>Transition-обновление — это обновление, которое можно сделать несрочным, чтобы не блокировать более важные взаимодействия.</p>
+      <p>Примеры:</p>
+      <pre><code>
+переключить вкладку с тяжёлым содержимым
+обновить большой список после ввода
+показать результаты фильтрации
+перейти к новой части UI, если старый UI может оставаться видимым
+      </code></pre>
+      <p>React docs формулирует смысл Transitions так: они позволяют UI оставаться отзывчивым даже во время re-render. Если пользователь начал один переход, а потом передумал и нажал другую вкладку, он не должен ждать окончания первого тяжёлого render-а.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>5. `startTransition`</h2>
+      <p><code>startTransition</code> — функция React, которая помечает state updates внутри переданного callback как Transition.</p>
+      <pre><code>
+import { startTransition } from 'react';
+
+function SearchPage() {
+  const [input, setInput] = useState('');
+  const [query, setQuery] = useState('');
+
+  function handleChange(event: React.ChangeEvent&lt;HTMLInputElement&gt;) {
+    const nextValue = event.target.value;
+
+    setInput(nextValue);
+
+    startTransition(() =&gt; {
+      setQuery(nextValue);
+    });
+  }
+
+  return (
+    &lt;&gt;
+      &lt;input value={input} onChange={handleChange} /&gt;
+      &lt;SearchResults query={query} /&gt;
+    &lt;/&gt;
+  );
+}
+      </code></pre>
+      <p>Здесь есть две разные задачи:</p>
+      <pre><code>
+setInput(nextValue)
+→ срочное обновление controlled input
+
+setQuery(nextValue)
+→ несрочное обновление результатов поиска
+      </code></pre>
+      <p>Если <code>SearchResults</code> тяжёлый, Transition позволяет React сохранить отзывчивость input. Ввод не должен ждать, пока тяжёлый список закончит re-render.</p>
+      <h3>Что важно знать про `startTransition`</h3>
+      <p>Callback внутри <code>startTransition</code> вызывается сразу. <code>startTransition</code> не откладывает сам callback как <code>setTimeout</code>. Он помечает updates, которые происходят во время его синхронного выполнения, как Transition.</p>
+      <pre><code>
+startTransition(() =&gt; {
+  setTab(nextTab);
+});
+      </code></pre>
+      <p>Эти updates становятся несрочными Transition updates.</p>
+      <p><code>startTransition</code> не возвращает pending state. Если нужно показывать, что transition ещё выполняется, обычно используют <code>useTransition</code>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>6. Ограничение: updates после async</h2>
+      <p>В документации React есть важное предостережение: state updates после <code>await</code> нужно снова обернуть в <code>startTransition</code>, чтобы они были помечены как Transition.</p>
+      <pre><code>
+startTransition(async () =&gt; {
+  const data = await fetchData();
+
+  startTransition(() =&gt; {
+    setData(data);
+  });
+});
+      </code></pre>
+      <p>Это выглядит странно, но на момент текущей документации это известное ограничение. Если после async-запроса вызвать <code>setState</code> без повторного <code>startTransition</code>, update может не получить Transition-маркировку.</p>
+      <p>Практический вывод:</p>
+      <pre><code>
+updates прямо внутри синхронного callback startTransition
+→ помечаются как Transition
+
+updates после await / setTimeout
+→ нужно снова обернуть, если они тоже должны быть Transition
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>7. `useTransition`</h2>
+      <p><code>useTransition</code> — Hook, который возвращает два значения:</p>
+      <pre><code>
+const [isPending, startTransition] = useTransition();
+      </code></pre>
+      <p><code>startTransition</code> помечает updates как Transition, а <code>isPending</code> показывает, что Transition ещё находится в процессе.</p>
+      <p>Пример:</p>
+      <pre><code>
+import { useTransition, useState } from 'react';
+
+function Tabs() {
+  const [tab, setTab] = useState('about');
+  const [isPending, startTransition] = useTransition();
+
+  function selectTab(nextTab: string) {
+    startTransition(() =&gt; {
+      setTab(nextTab);
+    });
+  }
+
+  return (
+    &lt;&gt;
+      &lt;button onClick={() =&gt; selectTab('about')}&gt;About&lt;/button&gt;
+      &lt;button onClick={() =&gt; selectTab('posts')}&gt;Posts&lt;/button&gt;
+
+      {isPending &amp;&amp; &lt;p&gt;Loading...&lt;/p&gt;}
+
+      &lt;TabContent tab={tab} /&gt;
+    &lt;/&gt;
+  );
+}
+      </code></pre>
+      <p>Смысл:</p>
+      <pre><code>
+пользователь нажал вкладку
+→ React помечает update tab как Transition
+→ старый UI может оставаться отзывчивым
+→ isPending позволяет показать состояние ожидания
+→ React завершает render новой вкладки
+      </code></pre>
+      <p><code>useTransition</code> особенно полезен, когда нужно не только сделать update несрочным, но и показать пользователю, что переход ещё не завершён.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>8. Что можно и нельзя оборачивать в Transition</h2>
+      <p>Transition предназначен для state updates, которые можно сделать несрочными.</p>
+      <p>Хорошие кандидаты:</p>
+      <pre><code>
+переключение тяжёлой вкладки
+обновление большого списка
+переключение route-like view
+обновление результатов поиска
+      </code></pre>
+      <p>Плохие кандидаты:</p>
+      <pre><code>
+value controlled input
+checked checkbox
+текст, который должен появиться сразу при вводе
+любое обновление, где задержка ломает ощущение прямого отклика
+      </code></pre>
+      <p>Например, это плохая идея:</p>
+      <pre><code>
+function handleChange(event: React.ChangeEvent&lt;HTMLInputElement&gt;) {
+  startTransition(() =&gt; {
+    setInput(event.target.value);
+  });
+}
+      </code></pre>
+      <p>Controlled input должен обновляться синхронно с вводом. Если сделать его Transition, ввод может лагать или вести себя не так, как ожидает пользователь.</p>
+      <p>Правильная модель:</p>
+      <pre><code>
+function handleChange(event: React.ChangeEvent&lt;HTMLInputElement&gt;) {
+  const nextValue = event.target.value;
+
+  setInput(nextValue); // срочно
+
+  startTransition(() =&gt; {
+    setQuery(nextValue); // несрочно
+  });
+}
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>9. Transitions являются interruptible</h2>
+      <p>Transition updates могут быть прерваны более срочными updates.</p>
+      <p>Пример:</p>
+      <pre><code>
+пользователь ввёл "r"
+→ запущен Transition для списка результатов
+
+пользователь сразу ввёл "re"
+→ срочное обновление input должно пройти быстро
+→ старый Transition можно прервать или начать заново
+      </code></pre>
+      <p>React docs описывает это как возможность сохранять UI отзывчивым во время re-render. Если пользователь меняет решение, он не обязан ждать завершения предыдущего несрочного render-а.</p>
+      <p>Важно не делать из этого слишком внутренний вывод. Публичная гарантия для разработчика такая:</p>
+      <pre><code>
+Transition помечает обновления как неблокирующие.
+Более срочные обновления могут прерывать такую работу.
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>10. `useDeferredValue`</h2>
+      <p><code>useDeferredValue</code> — Hook, который позволяет отложить обновление неважной части UI.</p>
+      <pre><code>
+const deferredValue = useDeferredValue(value);
+      </code></pre>
+      <p>Типичный пример — поиск.</p>
+      <pre><code>
+import { useDeferredValue, useState } from 'react';
+
+function SearchPage() {
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+
+  return (
+    &lt;&gt;
+      &lt;input
+        value={query}
+        onChange={event =&gt; setQuery(event.target.value)}
+      /&gt;
+
+      &lt;SearchResults query={deferredQuery} /&gt;
+    &lt;/&gt;
+  );
+}
+      </code></pre>
+      <p>Здесь input использует обычный <code>query</code> и остаётся отзывчивым. Тяжёлый <code>SearchResults</code> получает <code>deferredQuery</code>, который может отставать от актуального значения.</p>
+      <p>Смысл:</p>
+      <pre><code>
+query
+→ срочно обновляет input
+
+deferredQuery
+→ может отставать
+→ даёт React возможность отложить тяжёлую часть UI
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>11. Как работает `useDeferredValue` на уровне поведения</h2>
+      <p>Когда значение, переданное в <code>useDeferredValue</code>, меняется, React делает текущий render с прежним deferred value, а затем планирует background re-render с новым deferred value.</p>
+      <p>Пример:</p>
+      <pre><code>
+query = "react"
+deferredQuery = "rea"
+
+input уже показывает "react"
+results ещё показывают "rea"
+
+React планирует background render
+→ когда он завершится, results получат "react"
+      </code></pre>
+      <p>Документация React подчёркивает, что background re-render прерываем. Если значение снова изменится, React может начать background re-render заново.</p>
+      <p>Это похоже на Transition по цели: сохранить отзывчивость важной части UI. Но API другой.</p>
+      <pre><code>
+startTransition / useTransition
+→ разработчик помечает конкретные state updates как Transition
+
+useDeferredValue
+→ разработчик откладывает использование конкретного value в части UI
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>12. `useDeferredValue` и stale UI</h2>
+      <p>Deferred value может быть старым. Это не баг, а смысл Hook-а.</p>
+      <p>Пример:</p>
+      <pre><code>
+function SearchPage() {
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+
+  const isStale = query !== deferredQuery;
+
+  return (
+    &lt;&gt;
+      &lt;input
+        value={query}
+        onChange={e =&gt; setQuery(e.target.value)}
+      /&gt;
+
+      &lt;div style={{ opacity: isStale ? 0.5 : 1 }}&gt;
+        &lt;SearchResults query={deferredQuery} /&gt;
+      &lt;/div&gt;
+    &lt;/&gt;
+  );
+}
+      </code></pre>
+      <p>Если <code>query !== deferredQuery</code>, можно визуально показать, что результаты ещё догоняют ввод.</p>
+      <p>Смысл:</p>
+      <pre><code>
+input всегда актуален
+results могут отставать
+UI показывает stale-состояние
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>13. Ограничения `useDeferredValue`</h2>
+      <p>React docs указывает несколько предостережений.</p>
+      <p>Если update уже находится внутри Transition, <code>useDeferredValue</code> возвращает новое значение и не создаёт отдельный deferred render, потому что update уже отложен.</p>
+      <p>Ещё одно важное ограничение: значение, которое передаётся в <code>useDeferredValue</code>, должно быть примитивом или объектом, созданным вне render. Если создавать новый объект прямо во время render и передавать его в <code>useDeferredValue</code>, он будет отличаться на каждом render-е, что может вызвать лишние background re-renders.</p>
+      <p>Плохо:</p>
+      <pre><code>
+const deferredOptions = useDeferredValue({ query, limit: 20 });
+      </code></pre>
+      <p>Лучше:</p>
+      <pre><code>
+const options = useMemo(
+  () =&gt; ({ query, limit: 20 }),
+  [query]
+);
+
+const deferredOptions = useDeferredValue(options);
+      </code></pre>
+      <p>Или проще передавать primitive value:</p>
+      <pre><code>
+const deferredQuery = useDeferredValue(query);
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>14. `startTransition` vs `useTransition` vs `useDeferredValue`</h2>
+      <h3>`startTransition`</h3>
+      <p>Используется, когда нужно пометить updates как Transition, но pending state не нужен или Hook недоступен.</p>
+      <pre><code>
+startTransition(() =&gt; {
+  setPage(nextPage);
+});
+      </code></pre>
+      <h3>`useTransition`</h3>
+      <p>Используется внутри компонента, когда нужно и пометить updates как Transition, и получить <code>isPending</code>.</p>
+      <pre><code>
+const [isPending, startTransition] = useTransition();
+
+startTransition(() =&gt; {
+  setPage(nextPage);
+});
+      </code></pre>
+      <h3>`useDeferredValue`</h3>
+      <p>Используется, когда state update остаётся обычным, но конкретная часть UI должна использовать отложенную версию значения.</p>
+      <pre><code>
+const deferredQuery = useDeferredValue(query);
+      </code></pre>
+      <p>Практическое различие:</p>
+      <pre><code>
+Transition
+→ “это обновление можно считать несрочным”
+
+Deferred value
+→ “эта часть UI может использовать старое значение, пока новое готовится”
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>15. `flushSync`</h2>
+      <p><code>flushSync</code> из <code>react-dom</code> делает противоположное Transition-подходу. Он заставляет React синхронно сбросить updates внутри callback и обновить DOM немедленно.</p>
+      <pre><code>
+import { flushSync } from 'react-dom';
+
+function handleClick() {
+  flushSync(() =&gt; {
+    setCount(c =&gt; c + 1);
+  });
+
+  // к этому месту React уже попытался обновить DOM
+}
+      </code></pre>
+      <p>React docs прямо предупреждает: <code>flushSync</code> используется редко и может вредить производительности.</p>
+      <p><code>flushSync</code> нужен для интеграции со сторонними API или браузерными API, которым нужен уже обновлённый DOM к определённому моменту.</p>
+      <p>Примерная ситуация:</p>
+      <pre><code>
+нужно обновить state
+→ React должен применить DOM changes прямо сейчас
+→ после этого сторонний код читает DOM
+      </code></pre>
+      <p>В обычном React-коде лучше не использовать <code>flushSync</code>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>16. `flushSync` и batching</h2>
+      <p>Обычный путь:</p>
+      <pre><code>
+setState
+→ queue update
+→ batching
+→ scheduling
+→ render
+→ commit
+      </code></pre>
+      <p><code>flushSync</code> меняет этот путь:</p>
+      <pre><code>
+flushSync callback
+→ React синхронно сбрасывает updates внутри callback
+→ DOM обновляется до выхода из flushSync
+      </code></pre>
+      <p>Это может сломать ожидание, что React сам выберет удобный момент. Поэтому <code>flushSync</code> может ухудшить производительность, может заставить React показать fallback для Suspense и может выполнить pending Effects до возврата из <code>flushSync</code>.</p>
+      <p>Правило:</p>
+      <pre><code>
+flushSync
+→ emergency tool
+
+Transition / deferred value
+→ способ дать React больше свободы планирования
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>17. Lanes: что это и как о них писать</h2>
+      <p><code>Lane</code> — внутренний термин React. Он относится к реализации приоритетов и групп работы внутри React reconciler. В исходном коде React есть файл <code>ReactFiberLane.js</code>, где определяются lane-типы и операции с ними.</p>
+      <p>Но lanes не являются публичным API приложения. Разработчик не пишет:</p>
+      <pre><code>
+setState(value, lane);
+      </code></pre>
+      <p>и не должен строить бизнес-логику вокруг конкретных lane-значений.</p>
+      <p>React назначает обновлениям приоритет.</p>
+      <p>Во внутренней реализации React эта модель связана с lanes.</p>
+      <p>Публично разработчик работает не с lanes, а с APIs вроде startTransition, useTransition, useDeferredValue и flushSync.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>18. Lanes и Transition</h2>
+      <p>Несрочные Transition updates внутри React получают более низкую срочность, чем срочные пользовательские updates. На публичном уровне это выражается так:</p>
+      <pre><code>
+Transition update
+→ non-blocking
+→ может быть прерван более срочным update
+→ UI остаётся отзывчивым
+      </code></pre>
+      <p>На внутреннем уровне React может использовать lanes, чтобы хранить и обрабатывать разные категории работы.</p>
+      <p>Для практической статьи достаточно такой связи:</p>
+      <pre><code>
+startTransition / useTransition
+→ публично помечают updates как Transition
+
+lanes
+→ внутренняя модель, через которую React различает и обрабатывает приоритеты работы
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>19. Как scheduling подводит к render phase</h2>
+      <p>Когда React решил, какую работу выполнять, начинается render phase.</p>
+      <p>Смысловой переход:</p>
+      <pre><code>
+updates queued
+→ updates batched
+→ React assigned priority / scheduling decision
+→ React starts render work
+→ components are called
+→ reconciliation compares result
+      </code></pre>
+      <p>Scheduling не вычисляет UI. Он только организует работу.</p>
+      <pre><code>
+Scheduling
+→ когда и с каким приоритетом выполнять
+
+Render phase
+→ вычислить следующий UI
+
+Commit phase
+→ применить изменения к DOM
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>20. Пример: input + тяжёлый список без Transition</h2>
+      <pre><code>
+function SearchPage() {
+  const [query, setQuery] = useState('');
+
+  function handleChange(event: React.ChangeEvent&lt;HTMLInputElement&gt;) {
+    setQuery(event.target.value);
+  }
+
+  return (
+    &lt;&gt;
+      &lt;input value={query} onChange={handleChange} /&gt;
+      &lt;SlowList query={query} /&gt;
+    &lt;/&gt;
+  );
+}
+      </code></pre>
+      <p>Здесь одно значение <code>query</code> одновременно управляет input и тяжёлым списком.</p>
+      <p>При каждом вводе:</p>
+      <pre><code>
+пользователь печатает
+→ setQuery
+→ React должен обновить input
+→ React должен обновить SlowList
+      </code></pre>
+      <p>Если <code>SlowList</code> тяжёлый, ввод может ощущаться медленным.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>21. Пример: input + Transition</h2>
+      <pre><code>
+function SearchPage() {
+  const [input, setInput] = useState('');
+  const [query, setQuery] = useState('');
+  const [isPending, startTransition] = useTransition();
+
+  function handleChange(event: React.ChangeEvent&lt;HTMLInputElement&gt;) {
+    const nextValue = event.target.value;
+
+    setInput(nextValue);
+
+    startTransition(() =&gt; {
+      setQuery(nextValue);
+    });
+  }
+
+  return (
+    &lt;&gt;
+      &lt;input value={input} onChange={handleChange} /&gt;
+
+      {isPending &amp;&amp; &lt;p&gt;Updating results...&lt;/p&gt;}
+
+      &lt;SlowList query={query} /&gt;
+    &lt;/&gt;
+  );
+}
+      </code></pre>
+      <p>Теперь input обновляется срочно, а список — как Transition.</p>
+      <p>Смысл:</p>
+      <pre><code>
+input state
+→ срочный отклик на ввод
+
+query state
+→ несрочное обновление результата
+      </code></pre>
+      <p>Это лучше отражает пользовательский приоритет: введённый символ должен появиться сразу, а результаты могут догнать позже.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>22. Пример: input + `useDeferredValue`</h2>
+      <pre><code>
+function SearchPage() {
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+  const isStale = query !== deferredQuery;
+
+  return (
+    &lt;&gt;
+      &lt;input
+        value={query}
+        onChange={event =&gt; setQuery(event.target.value)}
+      /&gt;
+
+      &lt;div style={{ opacity: isStale ? 0.5 : 1 }}&gt;
+        &lt;SlowList query={deferredQuery} /&gt;
+      &lt;/div&gt;
+    &lt;/&gt;
+  );
+}
+      </code></pre>
+      <p>Здесь state один: <code>query</code>. Input всегда получает актуальное значение. SlowList получает отложенное значение.</p>
+      <p>Смысл:</p>
+      <pre><code>
+query
+→ актуальное значение для input
+
+deferredQuery
+→ отложенное значение для тяжёлой части UI
+      </code></pre>
+      <p>Этот подход удобен, когда не хочется разделять state на <code>input</code> и <code>query</code>, но нужно дать тяжёлой части UI возможность отставать.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>23. Чем Transition отличается от debounce</h2>
+      <p>Transition не является debounce.</p>
+      <p>Debounce обычно задерживает сам update или side effect на заданное время:</p>
+      <pre><code>
+пользователь печатает
+→ ждать 300ms
+→ выполнить update / запрос
+      </code></pre>
+      <p>Transition не говорит “жди 300ms”. Он говорит React:</p>
+      <pre><code>
+это обновление несрочное
+его можно прервать более срочными обновлениями
+      </code></pre>
+      <p><code>useDeferredValue</code> тоже не является debounce. Он не ждёт фиксированное время. Он позволяет React отложить re-render части UI и выполнить его, когда получится.</p>
+      <p>Если нужно ограничить сетевые запросы, debounce всё ещё может быть нужен. Если нужно сохранить отзывчивость UI при тяжёлом render-е, Transition или deferred value подходят лучше.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>24. Suspense и Transitions</h2>
+      <p>Transitions часто используются вместе с Suspense.</p>
+      <p>Если update внутри Transition приводит к тому, что часть UI suspends, React может не скрывать уже показанный UI мгновенно ради fallback, а сохранить более плавное поведение. Официальная документация Suspense показывает, что для переходов можно использовать <code>startTransition</code>, чтобы избежать замены уже видимого содержимого на fallback в некоторых сценариях.</p>
+      <p>Смысл:</p>
+      <pre><code>
+срочное обновление, которое suspends
+→ пользователь может резко увидеть fallback
+
+Transition update, который suspends
+→ React может сохранить уже видимый UI, пока готовится новый
+      </code></pre>
+      <p>Детали зависят от структуры Suspense boundaries и фреймворка. В статье про scheduling достаточно понять связь:</p>
+      <pre><code>
+Transitions
+→ помогают маркировать навигационные или тяжёлые обновления как несрочные
+
+Suspense
+→ может показать fallback, если содержимое ещё не готово
+
+Transition + Suspense
+→ помогают сделать ожидание менее резким для пользователя
+      </code></pre>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>25. Что важно не перепутать</h2>
+      <pre><code>
+Batching ≠ Scheduling
+      </code></pre>
+      <p>Batching группирует updates. Scheduling решает, как и когда выполнять работу.</p>
+      <pre><code>
+Scheduling ≠ Render phase
+      </code></pre>
+      <p>Scheduling организует работу. Render phase вычисляет следующий UI.</p>
+      <pre><code>
+Transition ≠ setTimeout
+      </code></pre>
+      <p><code>startTransition</code> не откладывает callback по таймеру. Callback выполняется сразу, а updates внутри него помечаются как Transition.</p>
+      <pre><code>
+Transition ≠ debounce
+      </code></pre>
+      <p>Transition не ждёт фиксированное время. Он меняет приоритет React work.</p>
+      <pre><code>
+useTransition ≠ useDeferredValue
+      </code></pre>
+      <p><code>useTransition</code> помечает updates. <code>useDeferredValue</code> возвращает отложенную версию value.</p>
+      <pre><code>
+isPending ≠ loading data обязательно
+      </code></pre>
+      <p><code>isPending</code> означает, что Transition ещё pending. Данные могут грузиться, но сам флаг относится к React Transition.</p>
+      <pre><code>
+useDeferredValue может показывать stale UI
+      </code></pre>
+      <p>Это нормальное поведение. Старое значение может оставаться видимым, пока React готовит новое.</p>
+      <pre><code>
+lanes ≠ публичный API
+      </code></pre>
+      <p>Lanes — внутренняя модель React. В приложении используются публичные API: <code>startTransition</code>, <code>useTransition</code>, <code>useDeferredValue</code>, <code>flushSync</code>.</p>
+      <pre><code>
+flushSync ≠ обычный способ ускорить React
+      </code></pre>
+      <p><code>flushSync</code> принудительно синхронен, редок и может ухудшить производительность.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>26. Полный проход по диапазону</h2>
+      <p>После пользовательского действия React получил один или несколько updates. Batching позволил обработать их вместе, если это безопасно. Теперь React должен решить, насколько срочно выполнять работу.</p>
+      <p>Срочные updates, связанные с непосредственным вводом пользователя, должны обновлять UI быстро. Несрочные updates можно пометить как Transition через <code>startTransition</code> или <code>useTransition</code>. Если нужно отложить не сам update, а использование значения в тяжёлой части UI, можно использовать <code>useDeferredValue</code>.</p>
+      <p>Внутри React эта модель связана с приоритетами и lanes. Но разработчик не управляет lanes напрямую. Он выражает намерение через публичные API: какие updates срочные, какие можно сделать Transition, какую часть UI можно отложить, и когда в редких случаях нужно принудительно синхронно обновить DOM через <code>flushSync</code>.</p>
+      <p>После scheduling React переходит к render phase / reconciliation: вызывает компоненты, вычисляет следующий UI и решает, какие изменения нужны. Это следующая статья.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>Источники</h2>
+      <h3>React docs</h3>
+      <p>* <a href="https://react.dev/reference/react/hooks">React docs — Built-in React Hooks</a></p>
+      <p>* <a href="https://react.dev/reference/react/startTransition">React docs — startTransition</a></p>
+      <p>* <a href="https://react.dev/reference/react/useTransition">React docs — useTransition</a></p>
+      <p>* <a href="https://react.dev/reference/react/useDeferredValue">React docs — useDeferredValue</a></p>
+      <p>* <a href="https://react.dev/reference/react-dom/flushSync">React docs — flushSync</a></p>
+      <p>* <a href="https://react.dev/reference/react/Suspense">React docs — Suspense</a></p>
+      <p>* <a href="https://react.dev/learn/queueing-a-series-of-state-updates">React docs — Queueing a Series of State Updates</a></p>
+      <p>* <a href="https://react.dev/learn/render-and-commit">React docs — Render and Commit</a></p>
+      <p>* <a href="https://react.dev/blog/2022/03/29/react-v18">React v18.0 release post</a></p>
+      <p>* <a href="https://react.dev/blog/2022/03/08/react-18-upgrade-guide#automatic-batching">React 18 Upgrade Guide — Automatic Batching</a></p>
+      <p>* <a href="https://react.dev/blog/2024/12/05/react-19">React v19 release post</a></p>
+      <h3>React source</h3>
+      <p>* <a href="https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberLane.js">React source — ReactFiberLane.js</a></p>
+    </section>
+  </main>
+</body>
+</html>
