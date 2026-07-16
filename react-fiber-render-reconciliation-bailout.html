@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
@@ -142,7 +142,49 @@ function App() {
     <hr>
 
     <section>
-      <h2>4. Fiber</h2>
+      <h2>4. Reconciliation как часть фазы render</h2>
+      <p>После вызова компонента React получает новый результат — React elements. Этот результат описывает, каким должен быть UI после текущего обновления. Дальше React должен сопоставить это новое описание с уже существующим деревом.</p>
+      <p>Это сопоставление и называется reconciliation.</p>
+      <p>Во время reconciliation React не меняет DOM. Он работает с внутренним деревом React: сравнивает новые React elements с текущими Fiber-узлами, решает, какие части дерева можно переиспользовать, какие нужно создать заново, какие удалить и где нужно подготовить работу для commit.</p>
+      <p>Важный момент: новая рабочая версия Fiber-дерева не появляется до reconciliation как уже готовая структура. Она формируется во время reconciliation. React проходит по текущему дереву, получает новый результат render-а и постепенно строит <code>work-in-progress tree</code>.</p>
+      <p>На этом этапе React принимает несколько ключевых решений:</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Что сравнивается</th>
+            <th>Что решает React</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Тип элемента</td>
+            <td>Можно ли переиспользовать старый узел или нужно заменить ветку.</td>
+          </tr>
+          <tr>
+            <td><code>key</code></td>
+            <td>Как сопоставить старых и новых детей в списке.</td>
+          </tr>
+          <tr>
+            <td>Позиция в дереве</td>
+            <td>Сохраняется ли состояние компонента.</td>
+          </tr>
+          <tr>
+            <td>Props и текст</td>
+            <td>Нужно ли подготовить обновление для commit.</td>
+          </tr>
+          <tr>
+            <td>Наличие работы в поддереве</td>
+            <td>Нужно ли идти глубже или можно сделать bailout.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>Поэтому reconciliation — это не отдельный этап после построения Fiber-дерева. Это работа, во время которой React строит рабочую версию Fiber-дерева на основе нового результата render-а и текущего дерева.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>5. Fiber</h2>
       <p>Fiber — это внутренняя рабочая структура React. Приложение не создаёт Fiber-узлы вручную и не управляет ими через публичный API.</p>
       <p>Удобная модель:</p>
       <table>
@@ -224,7 +266,7 @@ function App() {
     <hr>
 
     <section>
-      <h2>5. Зачем React нужен Fiber</h2>
+      <h2>6. Зачем React нужен Fiber</h2>
       <p>Fiber нужен React для того, чтобы представлять rendering как работу над отдельными узлами дерева.</p>
       <p>Без такой структуры React было бы сложнее:</p>
       <ul>
@@ -241,7 +283,7 @@ function App() {
     <hr>
 
     <section>
-      <h2>6. Два дерева: текущее и рабочее</h2>
+      <h2>7. Два дерева: текущее и рабочее</h2>
       <p>Во время обновления React держит две связанные версии дерева.</p>
       <table>
         <thead>
@@ -315,7 +357,7 @@ function Counter() {
     <hr>
 
     <section>
-      <h2>7. Почему это похоже на double buffering</h2>
+      <h2>8. Почему это похоже на double buffering</h2>
       <p>Эту модель часто называют double buffering.</p>
       <p>Смысл:</p>
       <ol>
@@ -332,7 +374,7 @@ function Counter() {
     <hr>
 
     <section>
-      <h2>8. Единица работы</h2>
+      <h2>9. Единица работы</h2>
       <p>Fiber-узел можно понимать как единицу работы.</p>
       <p>Для каждого Fiber-узла React должен ответить на вопросы:</p>
       <ul>
@@ -349,7 +391,7 @@ function Counter() {
     <hr>
 
     <section>
-      <h2>9. Спуск вниз и подъём вверх</h2>
+      <h2>10. Спуск вниз и подъём вверх</h2>
       <p>Во время фазы render React обходит Fiber-дерево. Упрощённо обход состоит из двух частей:</p>
       <table>
         <thead>
@@ -394,7 +436,18 @@ function Counter() {
     <hr>
 
     <section>
-      <h2>10. Пример обхода дерева</h2>
+      <h2>11. Reconciliation</h2>
+      <p>Reconciliation — это центральная работа фазы render. React сравнивает новый результат render-а с текущим Fiber-деревом и формирует <code>work-in-progress tree</code>.</p>
+      <p>Во время reconciliation React работает не с HTML-строками и не с DOM напрямую. Он сравнивает React elements и Fiber-узлы.</p>
+      <p>React elements показывают, каким должен быть UI после текущего обновления. Текущие Fiber-узлы показывают, что уже было в дереве до этого обновления. Результатом сравнения становится рабочая версия Fiber-дерева и набор признаков будущей работы для commit.</p>
+      <p>Если React видит, что элемент того же типа находится в той же позиции, он может переиспользовать существующую структуру и сохранить состояние. Если тип или <code>key</code> изменились, React воспринимает это как другую ветку. Если изменились props, текст или состав детей, React не меняет DOM сразу, а помечает соответствующие Fiber-узлы для будущей commit-работы.</p>
+      <p>Для React DOM это означает: reconciliation вычисляет, что должно измениться в DOM, но сами DOM-операции выполняются позже, на commit phase.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>12. Пример обхода дерева</h2>
       <p>Возьмём дерево:</p>
       <pre><code>
 function App() {
@@ -480,7 +533,7 @@ App
     <hr>
 
     <section>
-      <h2>11. Что происходит на спуске вниз</h2>
+      <h2>13. Что происходит на спуске вниз</h2>
       <p>Во время спуска React начинает работу над Fiber-узлом.</p>
       <p>Для function component это может включать:</p>
       <ul>
@@ -513,7 +566,7 @@ function Counter() {
     <hr>
 
     <section>
-      <h2>12. Что происходит на подъёме вверх</h2>
+      <h2>14. Что происходит на подъёме вверх</h2>
       <p>Когда дети узла обработаны, React поднимается обратно.</p>
       <p>На подъёме React завершает Fiber-узел:</p>
       <ul>
@@ -537,7 +590,7 @@ function Counter() {
     <hr>
 
     <section>
-      <h2>13. Флаги Fiber</h2>
+      <h2>15. Флаги Fiber</h2>
       <p>Флаги — это внутренние признаки работы, которую нужно выполнить на commit.</p>
       <p>Упрощённые смысловые категории:</p>
       <table>
@@ -580,7 +633,7 @@ function Counter() {
     <hr>
 
     <section>
-      <h2>14. `flags` и `subtreeFlags`</h2>
+      <h2>16. `flags` и `subtreeFlags`</h2>
       <p>У Fiber-узла есть два разных уровня признаков.</p>
       <table>
         <thead>
@@ -641,7 +694,7 @@ App
     <hr>
 
     <section>
-      <h2>15. Пример: изменение текста</h2>
+      <h2>17. Пример: изменение текста</h2>
       <p>Компонент:</p>
       <pre><code>
 function Counter() {
@@ -704,7 +757,7 @@ function Counter() {
     <hr>
 
     <section>
-      <h2>16. Пример: вставка элемента</h2>
+      <h2>18. Пример: вставка элемента</h2>
       <p>Компонент:</p>
       <pre><code>
 function List({ items }: { items: string[] }) {
@@ -762,7 +815,7 @@ function List({ items }: { items: string[] }) {
     <hr>
 
     <section>
-      <h2>17. Пример: удаление элемента</h2>
+      <h2>19. Пример: удаление элемента</h2>
       <p>Было:</p>
       <pre><code>
 ['A', 'B', 'C']
@@ -808,7 +861,7 @@ function List({ items }: { items: string[] }) {
     <hr>
 
     <section>
-      <h2>18. Пример: изменение типа</h2>
+      <h2>20. Пример: изменение типа</h2>
       <p>Было:</p>
       <pre><code>
 &lt;div className="card" /&gt;
@@ -849,7 +902,7 @@ function List({ items }: { items: string[] }) {
     <hr>
 
     <section>
-      <h2>19. Reconciliation работает с деревьями, а не HTML-строками</h2>
+      <h2>21. Reconciliation работает с деревьями, а не HTML-строками</h2>
       <p>React не сравнивает готовые HTML-строки.</p>
       <p>Он сравнивает результат render-а: React elements и соответствующие Fiber-узлы.</p>
       <p>Пример:</p>
@@ -895,7 +948,7 @@ function App({ name }: { name: string }) {
     <hr>
 
     <section>
-      <h2>20. Позиция компонента и сохранение состояния</h2>
+      <h2>22. Позиция компонента и сохранение состояния</h2>
       <p>React связывает состояние с позицией компонента в дереве.</p>
       <p>Пример:</p>
       <pre><code>
@@ -938,7 +991,7 @@ function App({ wrap }: { wrap: boolean }) {
     <hr>
 
     <section>
-      <h2>21. `key` и идентичность</h2>
+      <h2>23. `key` и идентичность</h2>
       <p><code>key</code> помогает React сопоставлять элементы между старым и новым деревом.</p>
       <p>Правильно:</p>
       <pre><code>
@@ -966,7 +1019,7 @@ function TodoList({ todos }: { todos: Todo[] }) {
     <hr>
 
     <section>
-      <h2>22. Intentional reset через `key`</h2>
+      <h2>24. Intentional reset через `key`</h2>
       <p>Изменение <code>key</code> можно использовать намеренно, чтобы сбросить состояние.</p>
       <pre><code>
 function ProfilePage({ userId }: { userId: string }) {
@@ -980,7 +1033,7 @@ function ProfilePage({ userId }: { userId: string }) {
     <hr>
 
     <section>
-      <h2>23. Bailout</h2>
+      <h2>25. Bailout</h2>
       <p>Bailout — это сокращение работы. React может понять, что для части дерева результат можно переиспользовать, и не идти глубже в эту ветку.</p>
       <p>Bailout может происходить на разных уровнях:</p>
       <table>
@@ -1015,7 +1068,7 @@ function ProfilePage({ userId }: { userId: string }) {
     <hr>
 
     <section>
-      <h2>24. Bailout при одинаковом state</h2>
+      <h2>26. Bailout при одинаковом state</h2>
       <p>Пример:</p>
       <pre><code>
 function Counter() {
@@ -1046,7 +1099,7 @@ setPerson({ name: 'Ada' });
     <hr>
 
     <section>
-      <h2>25. `memo` как способ помочь bailout</h2>
+      <h2>27. `memo` как способ помочь bailout</h2>
       <p><code>memo</code> позволяет React пропустить повторный вызов компонента, если родитель re-render-ился, но props компонента не изменились.</p>
       <pre><code>
 import { memo } from 'react';
@@ -1068,7 +1121,7 @@ const Greeting = memo(function Greeting({ name }: { name: string }) {
     <hr>
 
     <section>
-      <h2>26. Почему `memo` может не сработать</h2>
+      <h2>28. Почему `memo` может не сработать</h2>
       <p>Частая причина — новый объект или новая функция в props.</p>
       <pre><code>
 const Chart = memo(function Chart({ options }: { options: Options }) {
@@ -1100,7 +1153,7 @@ return &lt;Chart theme="dark" /&gt;;
     <hr>
 
     <section>
-      <h2>27. `useMemo` и `useCallback` в контексте bailout</h2>
+      <h2>29. `useMemo` и `useCallback` в контексте bailout</h2>
       <p><code>useMemo</code> кэширует результат вычисления между render-ами:</p>
       <pre><code>
 const visibleTodos = useMemo(
@@ -1148,7 +1201,7 @@ const handleSubmit = useCallback((orderDetails: OrderDetails) =&gt; {
     <hr>
 
     <section>
-      <h2>28. Context и bailout</h2>
+      <h2>30. Context и bailout</h2>
       <p>Если компонент читает context через <code>useContext</code>, изменение значения ближайшего Provider вызывает re-render этого компонента.</p>
       <pre><code>
 const ThemeContext = createContext('light');
@@ -1170,7 +1223,7 @@ const Button = memo(function Button() {
     <hr>
 
     <section>
-      <h2>29. Hooks во время render</h2>
+      <h2>31. Hooks во время render</h2>
       <p>Hooks вроде <code>useState</code>, <code>useReducer</code>, <code>useMemo</code>, <code>useCallback</code>, <code>useContext</code> вызываются во время render. Поэтому их нужно вызывать в одном и том же порядке на каждом render.</p>
       <p>Правильно:</p>
       <pre><code>
@@ -1197,7 +1250,7 @@ function Component({ enabled }: { enabled: boolean }) {
     <hr>
 
     <section>
-      <h2>30. `useMemo` должен быть чистым</h2>
+      <h2>32. `useMemo` должен быть чистым</h2>
       <p><code>useMemo</code> выполняет вычисление во время render. Поэтому его функция должна быть чистой.</p>
       <p>Плохо:</p>
       <pre><code>
@@ -1217,7 +1270,7 @@ const value = useMemo(() =&gt; compute(input), [input]);
     <hr>
 
     <section>
-      <h2>31. Strict Mode и повторные вызовы</h2>
+      <h2>33. Strict Mode и повторные вызовы</h2>
       <p>В development <code>&lt;StrictMode&gt;</code> может вызвать компонентную функцию дополнительный раз, чтобы обнаружить нечистый render.</p>
       <p>Плохой пример:</p>
       <pre><code>
@@ -1257,7 +1310,7 @@ function StoryTray({ stories }: { stories: Story[] }) {
     <hr>
 
     <section>
-      <h2>32. Как фаза render подготавливает commit</h2>
+      <h2>34. Как фаза render подготавливает commit</h2>
       <p>К концу фазы render React получает завершённое рабочее дерево.</p>
       <p>В нём есть:</p>
       <ul>
@@ -1274,7 +1327,7 @@ function StoryTray({ stories }: { stories: Story[] }) {
     <hr>
 
     <section>
-      <h2>33. Важное ограничение: render может быть прерван</h2>
+      <h2>35. Важное ограничение: render может быть прерван</h2>
       <p>В concurrent rendering React может начать работу над рабочим деревом, приостановить её, продолжить позже или выбросить незавершённый результат.</p>
       <p>Поэтому render должен быть чистым.</p>
       <p>Плохо:</p>
@@ -1301,7 +1354,7 @@ function Product({ product }: { product: Product }) {
     <hr>
 
     <section>
-      <h2>34. Bailout и прерванная работа — не одно и то же</h2>
+      <h2>36. Bailout и прерванная работа — не одно и то же</h2>
       <table>
         <thead>
           <tr>
@@ -1326,7 +1379,7 @@ function Product({ product }: { product: Product }) {
     <hr>
 
     <section>
-      <h2>35. Почему вопрос “Есть changes?” — упрощение</h2>
+      <h2>37. Почему вопрос “Есть changes?” — упрощение</h2>
       <p>В диаграмме может быть блок:</p>
       <pre><code>
 Render / Reconciliation
@@ -1369,7 +1422,7 @@ Render / Reconciliation
     <hr>
 
     <section>
-      <h2>36. Пример полного прохода</h2>
+      <h2>38. Пример полного прохода</h2>
       <p>Компонент:</p>
       <pre><code>
 function App() {
@@ -1456,7 +1509,7 @@ function Counter() {
     <hr>
 
     <section>
-      <h2>37. Ошибки мышления</h2>
+      <h2>39. Ошибки мышления</h2>
       <h3>“Fiber — это virtual DOM”</h3>
       <p>Нет. React elements описывают желаемый UI. Fiber — внутренняя рабочая структура React для обработки этого UI.</p>
       <h3>“React сравнивает DOM с DOM”</h3>
@@ -1478,7 +1531,7 @@ function Counter() {
     <hr>
 
     <section>
-      <h2>38. Что важно не перепутать</h2>
+      <h2>40. Что важно не перепутать</h2>
       <table>
         <thead>
           <tr>
@@ -1529,12 +1582,16 @@ function Counter() {
           </tr>
         </tbody>
       </table>
+      <p>Дальше начинается render phase. У React уже есть <code>current tree</code>: Fiber-дерево, которое соответствует текущему UI. Для нового обновления React начинает строить <code>work-in-progress tree</code>.</p>
+      <p>Рабочее дерево формируется во время reconciliation. React проходит по Fiber-узлам, вызывает компоненты там, где это требуется, получает новые React elements и сопоставляет их с текущими Fiber-узлами.</p>
+      <p>Если новый результат соответствует старой ветке по типу, позиции и <code>key</code>, React может переиспользовать узлы и сохранить состояние. Если соответствия нет, React создаёт новую ветку и помечает старую на удаление. Если изменились props, текст или состав детей, React ставит флаги будущей commit-работы. Если для ветки нет нужной работы, React может сделать bailout и не идти глубже без необходимости.</p>
+      <p>К концу render phase <code>work-in-progress tree</code> содержит следующую рабочую версию UI и информацию о том, что нужно применить на commit. DOM на этом этапе ещё не меняется.</p>
     </section>
 
     <hr>
 
     <section>
-      <h2>39. Итоговая модель</h2>
+      <h2>41. Итоговая модель</h2>
       <p>Фаза render в React — это построение и проверка рабочей версии дерева.</p>
       <p>React берёт текущее committed-дерево, создаёт рабочее дерево, проходит по нему вниз и вверх, вызывает компоненты, согласует детей, переиспользует подходящие старые Fiber-узлы, создаёт новые там, где нужно, помечает будущую commit-работу флагами и собирает сведения о флагах поддеревьев.</p>
       <p>Если React понимает, что ветку можно переиспользовать, он делает bailout и не идёт глубже без необходимости. Если изменения есть, они не применяются сразу: рабочее дерево только получает признаки будущей работы. DOM будет изменён на следующем этапе — commit phase.</p>
@@ -1569,3 +1626,5 @@ function Counter() {
   </main>
 </body>
 </html>
+
+
