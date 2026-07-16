@@ -1,0 +1,1029 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>React Fiber: фаза render, reconciliation и bailout</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>React Fiber: фаза render, reconciliation и bailout</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h3>Коротко</h3>
+      <p>Эта статья разбирает участок клиентского обновления React после планирования работы и до фазы commit:</p>
+      <p>| Участок | Смысл |</p>
+      <p>|---|---|</p>
+      <p>| <code>Schedule update / priority / lane</code> | React уже получил обновление и выбрал работу для выполнения. |</p>
+      <p>| <code>Render phase / Reconciliation</code> | React вычисляет следующий UI и сравнивает его с предыдущим деревом. |</p>
+      <p>| <code>Bailout</code> | React может сократить работу для ветки, если её результат можно переиспользовать. |</p>
+      <p>| <code>Commit phase</code> | Следующий этап: React применит подготовленные изменения к DOM. |</p>
+      <p>Главная идея:</p>
+      <blockquote>
+        <p>Fiber — внутренняя структура React, через которую React хранит дерево работы, строит новую версию UI, проходит по дереву вниз и вверх, отмечает нужные операции флагами и передаёт готовую работу в commit.</p>
+      </blockquote>
+    </section>
+
+    <section>
+      <h2>1. Что React называет render</h2>
+      <p>В документации React rendering описывается как вызов компонентов для вычисления того, что должно быть показано на экране.</p>
+      <p>На начальном render React вызывает корневой компонент. При последующих обновлениях React вызывает компонент, чьё состояние изменилось, и затем рекурсивно обрабатывает компоненты, которые он возвращает.</p>
+      <p>Пример:</p>
+      <pre><code>
+function App() {
+  return (
+    &lt;main&gt;
+      &lt;Header /&gt;
+      &lt;Counter /&gt;
+    &lt;/main&gt;
+  );
+}
+      </code></pre>
+      <p>При обработке такого дерева React должен получить результат для <code>App</code>, <code>Header</code> и <code>Counter</code>. Результатом работы компонента является описание UI: React elements, созданные из JSX.</p>
+      <p>Важно: фаза render не должна менять внешний мир. Компонент должен быть чистым: если props, состояние и context не изменились, результат должен быть тем же. Запросы, подписки, запись в DOM, аналитика и другие побочные действия не должны выполняться во время render.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>2. Render React и отрисовка браузера — разные вещи</h2>
+      <p>Слово “render” в React легко перепутать с браузерной отрисовкой. Это разные этапы.</p>
+      <p>| Этап | Кто выполняет | Что происходит |</p>
+      <p>|---|---|---|</p>
+      <p>| Фаза render React | React | Вызывает компоненты, получает React elements, сравнивает деревья, готовит работу для commit. |</p>
+      <p>| Фаза commit React | React DOM | Применяет подготовленные изменения к DOM. |</p>
+      <p>| Визуальный конвейер браузера | Браузер | Пересчитывает стили, раскладку, рисует и композитит слои. |</p>
+      <p>Если компонент “отрендерился”, это означает, что React вызвал его функцию и вычислил результат. Это ещё не означает, что DOM изменился или браузер уже нарисовал новые пиксели.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>3. React element</h2>
+      <p>React element — это объект JavaScript, который описывает желаемый UI.</p>
+      <p>JSX:</p>
+      <pre><code>
+&lt;h1 className="title"&gt;Hello&lt;/h1&gt;
+      </code></pre>
+      <p>на уровне смысла описывает:</p>
+      <pre><code>
+{
+  type: 'h1',
+  props: {
+    className: 'title',
+    children: 'Hello'
+  }
+}
+      </code></pre>
+      <p>Для пользовательского компонента:</p>
+      <pre><code>
+&lt;Greeting name="Ada" /&gt;
+      </code></pre>
+      <p>React element описывает тип компонента и props:</p>
+      <pre><code>
+{
+  type: Greeting,
+  props: {
+    name: 'Ada'
+  }
+}
+      </code></pre>
+      <p>React element — это описание. Он сам не хранит всю внутреннюю рабочую информацию React: состояние Hooks, связь с родителем, соседями, альтернативным деревом, lanes и флаги будущих операций. Для этой внутренней работы React использует Fiber.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>4. Fiber</h2>
+      <p>Fiber — это внутренняя рабочая структура React. Приложение не создаёт Fiber-узлы вручную и не управляет ими через публичный API.</p>
+      <p>Удобная модель:</p>
+      <p>| Понятие | Роль |</p>
+      <p>|---|---|</p>
+      <p>| React element | Публичное описание того, какой UI нужен. |</p>
+      <p>| Fiber | Внутренний узел работы React для обработки этого описания. |</p>
+      <p>| DOM node | Реальный узел браузерного DOM, который появляется или обновляется на commit. |</p>
+      <p>Fiber-узел может связывать:</p>
+      <p>| Поле / связь | Смысл |</p>
+      <p>|---|---|</p>
+      <p>| тип | Какой компонент или host-элемент обрабатывается: функция, класс, <code>div</code>, <code>button</code> и т.д. |</p>
+      <p>| props | Входные данные текущего узла. |</p>
+      <p>| состояние | Данные Hooks или class component state. |</p>
+      <p>| <code>return</code> | Родительский Fiber-узел. |</p>
+      <p>| <code>child</code> | Первый дочерний Fiber-узел. |</p>
+      <p>| <code>sibling</code> | Следующий соседний Fiber-узел. |</p>
+      <p>| <code>alternate</code> | Связь со второй версией того же узла: текущей или рабочей. |</p>
+      <p>| lanes | Приоритеты/группы работы, связанные с этим узлом или его поддеревом. |</p>
+      <p>| flags | Что нужно сделать с этим узлом на commit. |</p>
+      <p>| subtreeFlags | Есть ли commit-работа глубже в поддереве. |</p>
+      <p>Конкретные поля Fiber являются внутренней реализацией React. Они полезны для понимания механики, но не являются стабильным пользовательским API.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>5. Зачем React нужен Fiber</h2>
+      <p>Fiber нужен React для того, чтобы представлять rendering как работу над отдельными узлами дерева.</p>
+      <p>Без такой структуры React было бы сложнее:</p>
+      <ul>
+        <li>приоритизировать разные обновления;</li>
+        <li>прерывать несрочную работу;</li>
+        <li>продолжать работу позже;</li>
+        <li>переиспользовать уже готовые части дерева;</li>
+        <li>хранить связь между предыдущей и новой версией UI;</li>
+        <li>собрать список будущих операций commit.</li>
+      </ul>
+      <p>Публично это проявляется в возможностях React 18+ вроде concurrent rendering, transitions и прерываемой работы. Внутри это опирается на то, что React не просто рекурсивно вызывает компоненты “в один проход”, а работает с деревом Fiber-узлов.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>6. Два дерева: текущее и рабочее</h2>
+      <p>Во время обновления React держит две связанные версии дерева.</p>
+      <p>| Дерево | Что означает |</p>
+      <p>|---|---|</p>
+      <p>| <code>current tree</code> | Текущее дерево. Оно уже прошло commit и соответствует UI, который пользователь сейчас видит. |</p>
+      <p>| <code>work-in-progress tree</code> | Рабочее дерево. React строит его во время новой фазы render. |</p>
+      <p>Связь между двумя версиями узла хранится через <code>alternate</code>.</p>
+      <p>Представим компонент:</p>
+      <pre><code>
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    &lt;button onClick={() =&gt; setCount(count + 1)}&gt;
+      {count}
+    &lt;/button&gt;
+  );
+}
+      </code></pre>
+      <p>До клика текущее дерево можно представить так:</p>
+      <p>| Дерево | Состояние |</p>
+      <p>|---|---|</p>
+      <p>| <code>current tree</code> | <code>Counter(count: 0)</code> и DOM-кнопка с текстом <code>0</code>. |</p>
+      <p>После клика React получает update <code>setCount(1)</code>. Он не меняет текущее дерево сразу. Он создаёт или переиспользует рабочую версию:</p>
+      <p>| Дерево | Состояние |</p>
+      <p>|---|---|</p>
+      <p>| <code>current tree</code> | Всё ещё соответствует экрану: <code>Counter(count: 0)</code>. |</p>
+      <p>| <code>work-in-progress tree</code> | Вычисляется новая версия: <code>Counter(count: 1)</code>. |</p>
+      <p>Пока рабочее дерево не прошло commit, пользователь продолжает видеть UI из текущего дерева.</p>
+      <p>После успешного commit рабочее дерево становится новым текущим деревом. Прежняя текущая версия остаётся связанной через <code>alternate</code> и может быть переиспользована для следующего обновления.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>7. Почему это похоже на double buffering</h2>
+      <p>Эту модель часто называют double buffering.</p>
+      <p>Смысл:</p>
+      <ol>
+        <li>У React есть committed-версия дерева, которая соответствует экрану.</li>
+        <li>Для нового обновления React строит вторую версию дерева.</li>
+        <li>Если работа завершилась успешно, React применяет изменения.</li>
+        <li>После commit новая версия становится текущей.</li>
+      </ol>
+      <p>Это помогает понять два важных свойства.</p>
+      <p>Во-первых, фаза render может быть прервана. Если React начал строить рабочее дерево, но пришло более срочное обновление, незавершённая работа может быть отложена или выброшена. Пользователь при этом продолжает видеть committed UI из текущего дерева.</p>
+      <p>Во-вторых, commit должен быть целостным. Пользователь не должен увидеть половину старого дерева и половину незавершённого рабочего дерева. Поэтому рабочая версия становится видимой только после commit.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>8. Единица работы</h2>
+      <p>Fiber-узел можно понимать как единицу работы.</p>
+      <p>Для каждого Fiber-узла React должен ответить на вопросы:</p>
+      <ul>
+        <li>есть ли у этого узла обновления для текущих lanes;</li>
+        <li>нужно ли вызвать компонент;</li>
+        <li>можно ли переиспользовать старый результат;</li>
+        <li>какие дочерние узлы должны быть созданы, обновлены, удалены или переиспользованы;</li>
+        <li>нужно ли поставить флаги для commit;</li>
+        <li>есть ли работа глубже в поддереве.</li>
+      </ul>
+      <p>Фаза render состоит из последовательной обработки таких единиц работы.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>9. Спуск вниз и подъём вверх</h2>
+      <p>Во время фазы render React обходит Fiber-дерево. Упрощённо обход состоит из двух частей:</p>
+      <p>| Часть обхода | Что происходит |</p>
+      <p>|---|---|</p>
+      <p>| Спуск вниз | React начинает работу над узлом: проверяет входы, вызывает компонент или обрабатывает host-элемент, согласует детей. |</p>
+      <p>| Подъём вверх | React завершает узел: подготавливает host-детали, собирает флаги поддерева и возвращается к родителю. |</p>
+      <p>На уровне внутренних функций React этому соответствуют две большие идеи:</p>
+      <p>| Внутренний этап | Смысл |</p>
+      <p>|---|---|</p>
+      <p>| <code>beginWork</code> | Начать обработку Fiber-узла и определить, к каким детям идти дальше. |</p>
+      <p>| <code>completeWork</code> | Завершить Fiber-узел после обработки его детей и подготовить данные для commit. |</p>
+      <p>Эти имена относятся к внутреннему коду React. В статье они используются как модель, а не как публичный API.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>10. Пример обхода дерева</h2>
+      <p>Возьмём дерево:</p>
+      <pre><code>
+function App() {
+  return (
+    &lt;main&gt;
+      &lt;Header /&gt;
+      &lt;Counter /&gt;
+    &lt;/main&gt;
+  );
+}
+      </code></pre>
+      <p>Упрощённое дерево:</p>
+      <pre><code>
+App
+  main
+    Header
+    Counter
+      </code></pre>
+      <p>Порядок работы можно представить таблицей:</p>
+      <p>| Шаг | Направление | Узел | Что делает React |</p>
+      <p>|---:|---|---|---|</p>
+      <p>| 1 | Вниз | <code>App</code> | Начинает обработку <code>App</code>, вызывает компонент, получает <code>main</code>. |</p>
+      <p>| 2 | Вниз | <code>main</code> | Начинает обработку host-узла, переходит к детям. |</p>
+      <p>| 3 | Вниз | <code>Header</code> | Начинает обработку <code>Header</code>, получает его результат. |</p>
+      <p>| 4 | Вверх | <code>Header</code> | Завершает <code>Header</code>, возвращается к соседу. |</p>
+      <p>| 5 | Вниз | <code>Counter</code> | Начинает обработку <code>Counter</code>, применяет update состояния, получает новый JSX. |</p>
+      <p>| 6 | Вверх | <code>Counter</code> | Завершает <code>Counter</code>, поднимает информацию о работе выше. |</p>
+      <p>| 7 | Вверх | <code>main</code> | Завершает <code>main</code>, собирает сведения о дочерних изменениях. |</p>
+      <p>| 8 | Вверх | <code>App</code> | Завершает <code>App</code>, рабочее дерево готово к commit. |</p>
+      <p>Такой обход объясняет, почему React может ставить флаги на конкретных узлах, а затем поднимать информацию о них к родителям через <code>subtreeFlags</code>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>11. Что происходит на спуске вниз</h2>
+      <p>Во время спуска React начинает работу над Fiber-узлом.</p>
+      <p>Для function component это может включать:</p>
+      <ul>
+        <li>применить pending updates к состоянию;</li>
+        <li>подготовить dispatcher Hooks;</li>
+        <li>вызвать функцию компонента;</li>
+        <li>получить React elements;</li>
+        <li>сравнить новых детей с текущими детьми;</li>
+        <li>создать, переиспользовать или пометить дочерние Fiber-узлы.</li>
+      </ul>
+      <p>Пример:</p>
+      <pre><code>
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return &lt;button&gt;{count}&lt;/button&gt;;
+}
+      </code></pre>
+      <p>Если пришёл update <code>count: 1</code>, на спуске для <code>Counter</code> React вызывает функцию компонента и получает:</p>
+      <pre><code>
+&lt;button&gt;1&lt;/button&gt;
+      </code></pre>
+      <p>Теперь React должен согласовать этот новый результат со старым деревом, где было:</p>
+      <pre><code>
+&lt;button&gt;0&lt;/button&gt;
+      </code></pre>
+      <p>Если тип <code>button</code> тот же, React переиспользует соответствующий Fiber-узел для кнопки и позже подготовит обновление текстового содержимого.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>12. Что происходит на подъёме вверх</h2>
+      <p>Когда дети узла обработаны, React поднимается обратно.</p>
+      <p>На подъёме React завершает Fiber-узел:</p>
+      <ul>
+        <li>для host-узла может подготовить создание или обновление DOM-экземпляра;</li>
+        <li>сравнить старые и новые props host-узла;</li>
+        <li>отметить флаги, если нужны изменения;</li>
+        <li>собрать <code>subtreeFlags</code> из дочерних узлов;</li>
+        <li>передать информацию о работе родителю.</li>
+      </ul>
+      <p>Пример host-узла:</p>
+      <pre><code>
+&lt;button disabled={false}&gt;Save&lt;/button&gt;
+      </code></pre>
+      <p>поменялся на:</p>
+      <pre><code>
+&lt;button disabled={true}&gt;Save&lt;/button&gt;
+      </code></pre>
+      <p>Во время reconciliation React понимает: это тот же <code>button</code>, но prop <code>disabled</code> изменился. DOM ещё не меняется. Рабочий Fiber получает признак того, что на commit нужно обновить DOM-свойство.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>13. Флаги Fiber</h2>
+      <p>Флаги — это внутренние признаки работы, которую нужно выполнить на commit.</p>
+      <p>Упрощённые смысловые категории:</p>
+      <p>| Флаг | Что означает по смыслу |</p>
+      <p>|---|---|</p>
+      <p>| <code>Placement</code> | Нужно вставить новый узел или поддерево. |</p>
+      <p>| <code>Update</code> | Нужно обновить существующий узел: props, текст, ref или другую host-деталь. |</p>
+      <p>| <code>ChildDeletion</code> | Нужно удалить дочерний узел или поддерево. |</p>
+      <p>| <code>Ref</code> | Нужно прикрепить или обновить ref. |</p>
+      <p>| <code>Passive</code> | Есть пассивный effect, который будет обработан после commit. |</p>
+      <p>| <code>Layout</code> | Есть layout-работа, связанная с commit. |</p>
+      <p>Названия флагов относятся к внутренней реализации. В разных версиях React набор и детали флагов могут меняться. Для статьи важен принцип: <strong>render phase не выполняет DOM-операции, а помечает, что нужно сделать позже</strong>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>14. `flags` и `subtreeFlags`</h2>
+      <p>У Fiber-узла есть два разных уровня признаков.</p>
+      <p>| Поле | Смысл |</p>
+      <p>|---|---|</p>
+      <p>| <code>flags</code> | Работа, относящаяся к самому узлу. |</p>
+      <p>| <code>subtreeFlags</code> | Признак, что работа есть где-то ниже в поддереве. |</p>
+      <p>Пример:</p>
+      <pre><code>
+App
+  main
+    Counter
+      button
+      </code></pre>
+      <p>Если изменился текст внутри <code>button</code>, конкретная работа находится на узле кнопки или текстового потомка. Но commit-этапу нужно быстро понять, что в поддереве <code>App</code> вообще есть работа.</p>
+      <p>Для этого React на подъёме собирает сведения снизу вверх:</p>
+      <p>| Узел | Что происходит |</p>
+      <p>|---|---|</p>
+      <p>| <code>button</code> | Получает флаг обновления. |</p>
+      <p>| <code>Counter</code> | Получает информацию, что в его поддереве есть работа. |</p>
+      <p>| <code>main</code> | Получает информацию, что в его поддереве есть работа. |</p>
+      <p>| <code>App</code> | Получает информацию, что ниже есть commit-работа. |</p>
+      <p>Идея <code>subtreeFlags</code>: commit phase может пропускать целые поддеревья, если в них нет флагов. Это уменьшает обход там, где нечего применять.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>15. Пример: изменение текста</h2>
+      <p>Компонент:</p>
+      <pre><code>
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    &lt;button onClick={() =&gt; setCount(count + 1)}&gt;
+      {count}
+    &lt;/button&gt;
+  );
+}
+      </code></pre>
+      <p>Пользователь нажал кнопку. Было <code>0</code>, стало <code>1</code>.</p>
+      <p>Во время фазы render:</p>
+      <p>| Шаг | Что делает React |</p>
+      <p>|---:|---|</p>
+      <p>| 1 | Берёт текущее дерево, где <code>Counter</code> соответствует значению <code>0</code>. |</p>
+      <p>| 2 | Создаёт рабочую версию дерева. |</p>
+      <p>| 3 | На Fiber-узле <code>Counter</code> применяет update состояния. |</p>
+      <p>| 4 | Вызывает <code>Counter()</code> и получает JSX с текстом <code>1</code>. |</p>
+      <p>| 5 | Сравнивает старый и новый результат. Тип <code>button</code> тот же. |</p>
+      <p>| 6 | Понимает, что текстовый потомок изменился. |</p>
+      <p>| 7 | Помечает рабочее дерево флагом будущего обновления. |</p>
+      <p>| 8 | Поднимает информацию о флаге вверх через <code>subtreeFlags</code>. |</p>
+      <p>DOM-кнопка на этом этапе ещё не изменилась. Текст будет обновлён на commit phase.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>16. Пример: вставка элемента</h2>
+      <p>Компонент:</p>
+      <pre><code>
+function List({ items }: { items: string[] }) {
+  return (
+    &lt;ul&gt;
+      {items.map(item =&gt; (
+        &lt;li key={item}&gt;{item}&lt;/li&gt;
+      ))}
+    &lt;/ul&gt;
+  );
+}
+      </code></pre>
+      <p>Было:</p>
+      <pre><code>
+['A', 'B']
+      </code></pre>
+      <p>Стало:</p>
+      <pre><code>
+['A', 'B', 'C']
+      </code></pre>
+      <p>Во время reconciliation React сопоставляет элементы по <code>key</code>.</p>
+      <p>| Ключ | Старое дерево | Новое дерево | Решение |</p>
+      <p>|---|---|---|---|</p>
+      <p>| <code>A</code> | Есть | Есть | Переиспользовать. |</p>
+      <p>| <code>B</code> | Есть | Есть | Переиспользовать. |</p>
+      <p>| <code>C</code> | Нет | Есть | Создать новый Fiber и пометить на вставку. |</p>
+      <p>Для <code>C</code> появится работа на commit: нужно вставить новый DOM-узел <code>li</code>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>17. Пример: удаление элемента</h2>
+      <p>Было:</p>
+      <pre><code>
+['A', 'B', 'C']
+      </code></pre>
+      <p>Стало:</p>
+      <pre><code>
+['A', 'C']
+      </code></pre>
+      <p>React снова сопоставляет элементы по <code>key</code>.</p>
+      <p>| Ключ | Старое дерево | Новое дерево | Решение |</p>
+      <p>|---|---|---|---|</p>
+      <p>| <code>A</code> | Есть | Есть | Переиспользовать. |</p>
+      <p>| <code>B</code> | Есть | Нет | Пометить на удаление. |</p>
+      <p>| <code>C</code> | Есть | Есть | Переиспользовать. |</p>
+      <p>Удаление также не выполняется во время render. React только отмечает, что на commit нужно удалить соответствующий узел или поддерево.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>18. Пример: изменение типа</h2>
+      <p>Было:</p>
+      <pre><code>
+&lt;div className="card" /&gt;
+      </code></pre>
+      <p>Стало:</p>
+      <pre><code>
+&lt;section className="card" /&gt;
+      </code></pre>
+      <p>Тип host-элемента изменился: было <code>div</code>, стало <code>section</code>.</p>
+      <p>React не может просто изменить тип существующего DOM-узла. Он должен заменить ветку:</p>
+      <p>| Старое | Новое | Решение |</p>
+      <p>|---|---|---|</p>
+      <p>| <code>div</code> | <code>section</code> | Удалить старую ветку и создать новую. |</p>
+      <p>Для пользовательских компонентов правило похожее:</p>
+      <pre><code>
+&lt;Profile /&gt;
+      </code></pre>
+      <p>заменяется на:</p>
+      <pre><code>
+&lt;Settings /&gt;
+      </code></pre>
+      <p>Тип компонента изменился. React воспринимает это как другой компонент в этой позиции. State старого компонента не сохраняется.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>19. Reconciliation работает с деревьями, а не HTML-строками</h2>
+      <p>React не сравнивает готовые HTML-строки.</p>
+      <p>Он сравнивает результат render-а: React elements и соответствующие Fiber-узлы.</p>
+      <p>Пример:</p>
+      <pre><code>
+function App({ name }: { name: string }) {
+  return &lt;h1&gt;Hello, {name}&lt;/h1&gt;;
+}
+      </code></pre>
+      <p>Было:</p>
+      <pre><code>
+&lt;h1&gt;Hello, Ada&lt;/h1&gt;
+      </code></pre>
+      <p>Стало:</p>
+      <pre><code>
+&lt;h1&gt;Hello, Grace&lt;/h1&gt;
+      </code></pre>
+      <p>React видит:</p>
+      <p>| Часть | Результат сравнения |</p>
+      <p>|---|---|</p>
+      <p>| Тип <code>h1</code> | Не изменился. |</p>
+      <p>| Props <code>h1</code> | Не изменились или изменились частично. |</p>
+      <p>| Текстовый потомок | Изменился. |</p>
+      <p>Значит, не нужно пересоздавать весь <code>h1</code>; достаточно подготовить обновление текста.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>20. Позиция компонента и сохранение состояния</h2>
+      <p>React связывает состояние с позицией компонента в дереве.</p>
+      <p>Пример:</p>
+      <pre><code>
+function App() {
+  return (
+    &lt;div&gt;
+      &lt;Counter /&gt;
+      &lt;Counter /&gt;
+    &lt;/div&gt;
+  );
+}
+      </code></pre>
+      <p>Это два независимых <code>Counter</code>. Они имеют одинаковый тип, но разные позиции, поэтому состояние у них разное.</p>
+      <p>Если компонент остаётся в той же позиции и имеет тот же тип, состояние обычно сохраняется.</p>
+      <pre><code>
+function App({ show }: { show: boolean }) {
+  return (
+    &lt;div&gt;
+      {show ? &lt;Counter /&gt; : &lt;Counter /&gt;}
+    &lt;/div&gt;
+  );
+}
+      </code></pre>
+      <p>Хотя JSX написан в двух ветках, на этой позиции в дереве всё равно оказывается <code>Counter</code>. Для React это тот же тип в той же позиции.</p>
+      <p>Если структура меняется, состояние может сброситься:</p>
+      <pre><code>
+function App({ wrap }: { wrap: boolean }) {
+  return wrap ? (
+    &lt;section&gt;
+      &lt;Counter /&gt;
+    &lt;/section&gt;
+  ) : (
+    &lt;Counter /&gt;
+  );
+}
+      </code></pre>
+      <p>Теперь <code>Counter</code> находится в другой позиции дерева. Для React это может быть уже другая ветка.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>21. `key` и идентичность</h2>
+      <p><code>key</code> помогает React сопоставлять элементы между старым и новым деревом.</p>
+      <p>Правильно:</p>
+      <pre><code>
+function TodoList({ todos }: { todos: Todo[] }) {
+  return (
+    &lt;ul&gt;
+      {todos.map(todo =&gt; (
+        &lt;li key={todo.id}&gt;{todo.text}&lt;/li&gt;
+      ))}
+    &lt;/ul&gt;
+  );
+}
+      </code></pre>
+      <p><code>key</code> должен быть стабильным и связанным с идентичностью данных.</p>
+      <p>Плохо:</p>
+      <pre><code>
+{todos.map(todo =&gt; (
+  &lt;li key={Math.random()}&gt;{todo.text}&lt;/li&gt;
+))}
+      </code></pre>
+      <p>Такой ключ меняется при каждом render. React будет считать элементы новыми, из-за чего возможны лишние удаления/вставки и сброс состояния.</p>
+      <p>Индекс массива как <code>key</code> допустим только для простых статичных списков. Если элементы добавляются, удаляются или переставляются, индекс может привести к неправильному сохранению состояния между элементами.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>22. Intentional reset через `key`</h2>
+      <p>Изменение <code>key</code> можно использовать намеренно, чтобы сбросить состояние.</p>
+      <pre><code>
+function ProfilePage({ userId }: { userId: string }) {
+  return &lt;ProfileForm key={userId} userId={userId} /&gt;;
+}
+      </code></pre>
+      <p>Когда <code>userId</code> меняется, меняется и <code>key</code>. React воспринимает это как новый <code>ProfileForm</code>, создаёт его заново и сбрасывает внутреннее состояние формы.</p>
+      <p>Это не обычный re-render. Это remount: старая ветка удаляется, новая создаётся.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>23. Bailout</h2>
+      <p>Bailout — это сокращение работы. React может понять, что для части дерева результат можно переиспользовать, и не идти глубже в эту ветку.</p>
+      <p>Bailout может происходить на разных уровнях:</p>
+      <p>| Ситуация | Почему возможен bailout |</p>
+      <p>|---|---|</p>
+      <p>| Setter получил то же значение состояния | Новое значение совпадает с текущим через <code>Object.is</code>. |</p>
+      <p>| Компонент обёрнут в <code>memo</code>, props не изменились | React может переиспользовать результат компонента. |</p>
+      <p>| Поддерево не содержит работы для текущих lanes | React может не заходить глубже при этом проходе. |</p>
+      <p>| JSX-узел был закэширован через <code>useMemo</code> | React видит тот же неизменяемый объект JSX. |</p>
+      <p>Bailout не означает, что update “исчез”. React мог получить update, проверить входы и решить, что конкретную ветку можно переиспользовать.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>24. Bailout при одинаковом state</h2>
+      <p>Пример:</p>
+      <pre><code>
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    &lt;button onClick={() =&gt; setCount(0)}&gt;
+      {count}
+    &lt;/button&gt;
+  );
+}
+      </code></pre>
+      <p>Если <code>count</code> уже равен <code>0</code>, React получает update с тем же значением. React использует сравнение <code>Object.is</code> и может пропустить дальнейшую работу для этой ветки.</p>
+      <p>С объектами нужно быть внимательным:</p>
+      <pre><code>
+const [person, setPerson] = useState({ name: 'Ada' });
+
+setPerson(person);
+      </code></pre>
+      <p>Здесь ссылка та же. React видит то же значение.</p>
+      <p>А здесь ссылка новая:</p>
+      <pre><code>
+setPerson({ name: 'Ada' });
+      </code></pre>
+      <p>Даже если содержимое такое же, объект новый, поэтому для React это новое значение.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>25. `memo` как способ помочь bailout</h2>
+      <p><code>memo</code> позволяет React пропустить повторный вызов компонента, если родитель re-render-ился, но props компонента не изменились.</p>
+      <pre><code>
+import { memo } from 'react';
+
+const Greeting = memo(function Greeting({ name }: { name: string }) {
+  return &lt;h1&gt;Hello, {name}&lt;/h1&gt;;
+});
+      </code></pre>
+      <p>Если родитель re-render-ится, но <code>name</code> остался тем же, React обычно может переиспользовать прежний результат <code>Greeting</code>.</p>
+      <p>Ограничения:</p>
+      <ul>
+        <li><code>memo</code> не блокирует обновления собственного состояния компонента;</li>
+        <li><code>memo</code> не блокирует изменение context, который компонент сам читает;</li>
+        <li><code>memo</code> бесполезен, если props каждый раз новые по ссылке;</li>
+        <li><code>memo</code> — оптимизация, а не гарантия.</li>
+      </ul>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>26. Почему `memo` может не сработать</h2>
+      <p>Частая причина — новый объект или новая функция в props.</p>
+      <pre><code>
+const Chart = memo(function Chart({ options }: { options: Options }) {
+  return &lt;div&gt;{options.theme}&lt;/div&gt;;
+});
+
+function Page() {
+  return &lt;Chart options={{ theme: 'dark' }} /&gt;;
+}
+      </code></pre>
+      <p>На каждом render <code>Page</code> создаёт новый объект <code>{ theme: 'dark' }</code>. Для <code>memo</code> это новые props.</p>
+      <p>Варианты исправления:</p>
+      <pre><code>
+const options = useMemo(() =&gt; ({ theme: 'dark' }), []);
+
+return &lt;Chart options={options} /&gt;;
+      </code></pre>
+      <p>или проще:</p>
+      <pre><code>
+return &lt;Chart theme="dark" /&gt;;
+      </code></pre>
+      <p>С функциями похожая ситуация:</p>
+      <pre><code>
+&lt;ShippingForm onSubmit={() =&gt; post(productId)} /&gt;
+      </code></pre>
+      <p>Каждый render создаёт новую функцию. Если <code>ShippingForm</code> обёрнут в <code>memo</code>, стабильная ссылка может потребовать <code>useCallback</code>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>27. `useMemo` и `useCallback` в контексте bailout</h2>
+      <p><code>useMemo</code> кэширует результат вычисления между render-ами:</p>
+      <pre><code>
+const visibleTodos = useMemo(
+  () =&gt; filterTodos(todos, tab),
+  [todos, tab]
+);
+      </code></pre>
+      <p>Он помогает, когда:</p>
+      <ul>
+        <li>вычисление дорогое;</li>
+        <li>результат передаётся в компонент, обёрнутый в <code>memo</code>;</li>
+        <li>нужна стабильная ссылка для массива или объекта.</li>
+      </ul>
+      <p><code>useCallback</code> кэширует функцию:</p>
+      <pre><code>
+const handleSubmit = useCallback((orderDetails: OrderDetails) =&gt; {
+  post('/buy', { productId, orderDetails });
+}, [productId]);
+      </code></pre>
+      <p>Он помогает, когда функция передаётся в компонент, обёрнутый в <code>memo</code>, или используется как зависимость другого Hook.</p>
+      <p>Важно:</p>
+      <p>| Hook | Что делает | Чего не делает |</p>
+      <p>|---|---|---|</p>
+      <p>| <code>useMemo</code> | Кэширует значение. | Не запрещает re-render компонента. |</p>
+      <p>| <code>useCallback</code> | Кэширует функцию. | Не ускоряет код автоматически. |</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>28. Context и bailout</h2>
+      <p>Если компонент читает context через <code>useContext</code>, изменение значения ближайшего Provider вызывает re-render этого компонента.</p>
+      <pre><code>
+const ThemeContext = createContext('light');
+
+const Button = memo(function Button() {
+  const theme = useContext(ThemeContext);
+  return &lt;button className={theme}&gt;Save&lt;/button&gt;;
+});
+      </code></pre>
+      <p>Даже если <code>Button</code> обёрнут в <code>memo</code>, изменение <code>ThemeContext</code> важно для результата <code>Button</code>, поэтому React должен вызвать его снова.</p>
+      <p>Практические приёмы:</p>
+      <ul>
+        <li>разделять contexts по независимым данным;</li>
+        <li>мемоизировать объект <code>value</code> у Provider;</li>
+        <li>читать context во внешнем компоненте и передавать в тяжёлый дочерний компонент минимальные props.</li>
+      </ul>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>29. Hooks во время render</h2>
+      <p>Hooks вроде <code>useState</code>, <code>useReducer</code>, <code>useMemo</code>, <code>useCallback</code>, <code>useContext</code> вызываются во время render. Поэтому их нужно вызывать в одном и том же порядке на каждом render.</p>
+      <p>Правильно:</p>
+      <pre><code>
+function Component() {
+  const [count, setCount] = useState(0);
+  const value = useMemo(() =&gt; expensive(count), [count]);
+
+  return &lt;p&gt;{value}&lt;/p&gt;;
+}
+      </code></pre>
+      <p>Неправильно:</p>
+      <pre><code>
+function Component({ enabled }: { enabled: boolean }) {
+  if (enabled) {
+    const [count, setCount] = useState(0);
+  }
+
+  return null;
+}
+      </code></pre>
+      <p>React связывает данные Hooks с компонентом между render-ами по порядку вызовов. Если порядок меняется, сопоставление ломается.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>30. `useMemo` должен быть чистым</h2>
+      <p><code>useMemo</code> выполняет вычисление во время render. Поэтому его функция должна быть чистой.</p>
+      <p>Плохо:</p>
+      <pre><code>
+const value = useMemo(() =&gt; {
+  localStorage.setItem('x', '1');
+  return compute();
+}, []);
+      </code></pre>
+      <p>Это побочное действие во время render.</p>
+      <p>Правильно:</p>
+      <pre><code>
+const value = useMemo(() =&gt; compute(input), [input]);
+      </code></pre>
+      <p><code>useMemo</code> нужен для чистой калькуляции или стабильной ссылки. Синхронизация с внешними системами относится к Effects.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>31. Strict Mode и повторные вызовы</h2>
+      <p>В development <code>&lt;StrictMode&gt;</code> может вызвать компонентную функцию дополнительный раз, чтобы обнаружить нечистый render.</p>
+      <p>Плохой пример:</p>
+      <pre><code>
+function StoryTray({ stories }: { stories: Story[] }) {
+  stories.push({ id: 'create', label: 'Create Story' });
+
+  return (
+    &lt;ul&gt;
+      {stories.map(story =&gt; (
+        &lt;li key={story.id}&gt;{story.label}&lt;/li&gt;
+      ))}
+    &lt;/ul&gt;
+  );
+}
+      </code></pre>
+      <p>Компонент мутирует props. Повторный вызов render делает ошибку заметнее.</p>
+      <p>Правильный вариант:</p>
+      <pre><code>
+function StoryTray({ stories }: { stories: Story[] }) {
+  const items = [
+    ...stories,
+    { id: 'create', label: 'Create Story' },
+  ];
+
+  return (
+    &lt;ul&gt;
+      {items.map(story =&gt; (
+        &lt;li key={story.id}&gt;{story.label}&lt;/li&gt;
+      ))}
+    &lt;/ul&gt;
+  );
+}
+      </code></pre>
+      <p>Strict Mode — проверка режима разработки. Не нужно оптимизировать приложение только потому, что в development компонент вызывается дополнительный раз.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>32. Как фаза render подготавливает commit</h2>
+      <p>К концу фазы render React получает завершённое рабочее дерево.</p>
+      <p>В нём есть:</p>
+      <ul>
+        <li>новые props и состояние;</li>
+        <li>переиспользованные или созданные Fiber-узлы;</li>
+        <li>связь с текущим деревом через <code>alternate</code>;</li>
+        <li>флаги на узлах, где нужна commit-работа;</li>
+        <li><code>subtreeFlags</code>, которые показывают, где внутри поддеревьев есть работа.</li>
+      </ul>
+      <p>Если изменений нет, React может не выполнять DOM-мутации. Если изменения есть, рабочее дерево передаётся в commit phase.</p>
+      <p>Commit phase использует подготовленную информацию и применяет изменения к DOM. Именно там будут вставки, удаления, обновления DOM-свойств, прикрепление refs и запуск commit-related Effects.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>33. Важное ограничение: render может быть прерван</h2>
+      <p>В concurrent rendering React может начать работу над рабочим деревом, приостановить её, продолжить позже или выбросить незавершённый результат.</p>
+      <p>Поэтому render должен быть чистым.</p>
+      <p>Плохо:</p>
+      <pre><code>
+function Product({ product }: { product: Product }) {
+  analytics.track('render product');
+  return &lt;h1&gt;{product.name}&lt;/h1&gt;;
+}
+      </code></pre>
+      <p>Если React начнёт render и потом выбросит эту работу, аналитика уже будет отправлена, хотя UI не был committed.</p>
+      <p>Правильно:</p>
+      <pre><code>
+function Product({ product }: { product: Product }) {
+  useEffect(() =&gt; {
+    analytics.track('view product');
+  }, [product.id]);
+
+  return &lt;h1&gt;{product.name}&lt;/h1&gt;;
+}
+      </code></pre>
+      <p>Побочные действия относятся к event handlers, Effects или commit-related API, а не к render.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>34. Bailout и прерванная работа — не одно и то же</h2>
+      <p>| Понятие | Смысл |</p>
+      <p>|---|---|</p>
+      <p>| Bailout | React понял, что ветку можно переиспользовать и не пересчитывать глубже. |</p>
+      <p>| Прерванная работа | React начал render, но остановил или отложил его из-за планирования. |</p>
+      <p>Bailout связан с отсутствием нужной работы или неизменившимися входами. Прерывание связано с приоритетами и возможностью React уступать более срочным обновлениям.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>35. Почему вопрос “Есть changes?” — упрощение</h2>
+      <p>В диаграмме может быть блок:</p>
+      <pre><code>
+Render / Reconciliation
+Есть changes?
+      </code></pre>
+      <p>Это полезное учебное упрощение, но в реальности React не задаёт один глобальный вопрос для всего приложения. Он принимает такие решения локально:</p>
+      <p>| Где | Что может произойти |</p>
+      <p>|---|---|</p>
+      <p>| На уровне state update | Новое значение совпало со старым — дальнейшая работа может быть пропущена. |</p>
+      <p>| На уровне <code>memo</code> | Props не изменились — компонент можно не вызывать. |</p>
+      <p>| На уровне детей | Старые и новые children сопоставлены, часть переиспользована. |</p>
+      <p>| На уровне поддерева | Нет работы для текущих lanes — можно не идти глубже. |</p>
+      <p>| На уровне флагов | Если в ветке нет flags/subtreeFlags, commit может пропустить её. |</p>
+      <p>Лучше понимать этот блок как набор локальных решений: где-то React продолжает работу, где-то переиспользует старое, где-то ставит флаги для commit.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>36. Пример полного прохода</h2>
+      <p>Компонент:</p>
+      <pre><code>
+function App() {
+  return (
+    &lt;main&gt;
+      &lt;Header /&gt;
+      &lt;Counter /&gt;
+    &lt;/main&gt;
+  );
+}
+
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    &lt;button onClick={() =&gt; setCount(count + 1)}&gt;
+      {count}
+    &lt;/button&gt;
+  );
+}
+      </code></pre>
+      <p>Пользователь нажал кнопку.</p>
+      <p>| Этап | Что происходит |</p>
+      <p>|---:|---|</p>
+      <p>| 1 | <code>setCount</code> ставит update в очередь. |</p>
+      <p>| 2 | Scheduler выбирает работу для выполнения. |</p>
+      <p>| 3 | React создаёт рабочее дерево из текущего дерева. |</p>
+      <p>| 4 | На спуске доходит до <code>Counter</code>. |</p>
+      <p>| 5 | React применяет update состояния и вызывает <code>Counter()</code>. |</p>
+      <p>| 6 | <code>Counter()</code> возвращает <code>button</code> с новым текстом. |</p>
+      <p>| 7 | React сравнивает старый и новый результат. |</p>
+      <p>| 8 | Тип <code>button</code> тот же, но текст изменился. |</p>
+      <p>| 9 | Fiber-узел получает флаг будущего обновления. |</p>
+      <p>| 10 | На подъёме React поднимает сведения о флагах через <code>subtreeFlags</code>. |</p>
+      <p>| 11 | Рабочее дерево завершено и готово к commit. |</p>
+      <p>| 12 | На commit React обновит текст в DOM. |</p>
+      <p>Главное: пункты 3–11 относятся к фазе render. DOM меняется только в пункте 12.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>37. Ошибки мышления</h2>
+      <h3>“Fiber — это virtual DOM”</h3>
+      <p>Нет. React elements описывают желаемый UI. Fiber — внутренняя рабочая структура React для обработки этого UI.</p>
+      <h3>“React сравнивает DOM с DOM”</h3>
+      <p>Нет. React сравнивает новый результат render с предыдущим деревом React/Fiber. DOM применяется позже на commit.</p>
+      <h3>“Re-render всегда меняет DOM”</h3>
+      <p>Нет. Компонент может быть вызван снова, но результат может совпасть с прошлым. Тогда DOM-мутация не нужна.</p>
+      <h3>“Bailout означает, что update исчез”</h3>
+      <p>Нет. React мог получить update, проверить входы и решить, что конкретную ветку можно переиспользовать.</p>
+      <h3>“Флаги — это DOM-операции”</h3>
+      <p>Нет. Флаги — это признаки будущей commit-работы. Сами DOM-операции выполняются позже.</p>
+      <h3>“`subtreeFlags` нужны для render”</h3>
+      <p>Нет. Их смысл — помочь следующим этапам быстро понимать, где в поддереве есть commit-работа.</p>
+      <h3>“`memo` запрещает re-render навсегда”</h3>
+      <p>Нет. <code>memo</code> — оптимизация. Собственное состояние, context и изменившиеся props всё равно могут привести к re-render.</p>
+      <h3>“Render можно использовать для аналитики”</h3>
+      <p>Нет. Render должен быть чистым. Иначе прерываемый render и Strict Mode будут выявлять проблемы.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>38. Что важно не перепутать</h2>
+      <p>| Не путать | Правильное различие |</p>
+      <p>|---|---|</p>
+      <p>| React render и браузерную отрисовку | React вызывает компоненты; браузер позже рисует пиксели. |</p>
+      <p>| Фазу render и фазу commit | Render вычисляет; commit применяет. |</p>
+      <p>| React element и Fiber | Element — описание UI; Fiber — внутренняя рабочая структура. |</p>
+      <p>| Fiber и DOM node | Fiber хранит работу React; DOM node живёт в браузере. |</p>
+      <p>| <code>current tree</code> и <code>work-in-progress tree</code> | Current уже соответствует экрану; work-in-progress только вычисляется. |</p>
+      <p>| Reconciliation и DOM mutation | Reconciliation вычисляет изменения; DOM mutation выполняется на commit. |</p>
+      <p>| <code>flags</code> и <code>subtreeFlags</code> | <code>flags</code> относятся к узлу; <code>subtreeFlags</code> показывают работу ниже. |</p>
+      <p>| Bailout и отсутствие update | Update мог быть обработан; React просто переиспользовал результат ветки. |</p>
+      <p>| Изменение <code>key</code> и обычный re-render | Новый <code>key</code> может привести к remount и сбросу состояния. |</p>
+      <p>| <code>useMemo</code> и запрет render | <code>useMemo</code> кэширует значение, но не запрещает вызов компонента. |</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>39. Итоговая модель</h2>
+      <p>Фаза render в React — это построение и проверка рабочей версии дерева.</p>
+      <p>React берёт текущее committed-дерево, создаёт рабочее дерево, проходит по нему вниз и вверх, вызывает компоненты, согласует детей, переиспользует подходящие старые Fiber-узлы, создаёт новые там, где нужно, помечает будущую commit-работу флагами и собирает сведения о флагах поддеревьев.</p>
+      <p>Если React понимает, что ветку можно переиспользовать, он делает bailout и не идёт глубже без необходимости. Если изменения есть, они не применяются сразу: рабочее дерево только получает признаки будущей работы. DOM будет изменён на следующем этапе — commit phase.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>Источники</h2>
+      <h3>React documentation</h3>
+      <p>* <a href="https://react.dev/learn/render-and-commit">React docs — Render and Commit</a></p>
+      <p>* <a href="https://react.dev/reference/rules/components-and-hooks-must-be-pure">React docs — Components and Hooks must be pure</a></p>
+      <p>* <a href="https://react.dev/learn/preserving-and-resetting-state">React docs — Preserving and Resetting State</a></p>
+      <p>* <a href="https://react.dev/reference/rules/rules-of-hooks">React docs — Rules of Hooks</a></p>
+      <p>* <a href="https://react.dev/reference/react/memo">React docs — memo</a></p>
+      <p>* <a href="https://react.dev/reference/react/useMemo">React docs — useMemo</a></p>
+      <p>* <a href="https://react.dev/reference/react/useCallback">React docs — useCallback</a></p>
+      <p>* <a href="https://react.dev/reference/react/StrictMode">React docs — StrictMode</a></p>
+      <p>* <a href="https://react.dev/reference/react/createElement">React docs — createElement</a></p>
+      <h3>React source</h3>
+      <p>* <a href="https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberWorkLoop.js">React source — ReactFiberWorkLoop.js</a></p>
+      <p>* <a href="https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberBeginWork.js">React source — ReactFiberBeginWork.js</a></p>
+      <p>* <a href="https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberCompleteWork.js">React source — ReactFiberCompleteWork.js</a></p>
+      <p>* <a href="https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberFlags.js">React source — ReactFiberFlags.js</a></p>
+      <p>* <a href="https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactChildFiber.js">React source — ReactChildFiber.js</a></p>
+      <p>* <a href="https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberLane.js">React source — ReactFiberLane.js</a></p>
+      <h3>Tejas Kumar / Fluent React</h3>
+      <p>* <a href="https://www.oreilly.com/library/view/fluent-react/9781098138707/">Fluent React — Tejas Kumar, O’Reilly</a></p>
+      <p>* <a href="https://www.oreilly.com/library/view/fluent-react/9781098138707/ch04.html">Fluent React, Chapter 4 — Inside Reconciliation</a></p>
+      <p>* <a href="https://gitnation.com/contents/understanding-reacts-fiber-architecture">Tejas Kumar — Understanding React’s Fiber Architecture</a></p>
+    </section>
+  </main>
+</body>
+</html>
