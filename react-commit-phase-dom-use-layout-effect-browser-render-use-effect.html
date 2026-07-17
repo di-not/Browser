@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>React update: commit phase, DOM mutations, useLayoutEffect, browser render и useEffect</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="toc.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>React update: commit phase, DOM mutations, useLayoutEffect, browser render и useEffect</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>1. Где начинается эта часть</h2>
+      <p>Эта статья продолжает ветку клиентского обновления React после <code>setState</code>, batching, scheduling, render phase, reconciliation и Fiber. На этом месте React уже не решает, <strong>каким должен быть следующий UI</strong>. Это было сделано раньше, во время render/reconciliation. Теперь React должен применить подготовленный результат к уже существующему DOM.</p>
+      <p>В статье <a href="https://di-not.github.io/Browser/react-initial-render-effects-interactive.html">React initial render: первый render компонента, commit, useLayoutEffect и useEffect</a> уже разобран первый запуск React UI: <code>root.render(&lt;App /&gt;)</code>, первый commit, <code>useLayoutEffect</code>, первый paint и <code>useEffect</code>. Текущий материал не повторяет этот путь. Здесь рассматривается update уже интерактивного интерфейса: например, пользователь нажал кнопку, React пересчитал часть дерева и теперь должен применить изменения к DOM.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>2. Что commit получает от render/reconciliation</h2>
+      <p>Commit phase не вызывает компоненты заново. На этом этапе React уже не выполняет reconciliation и не сравнивает деревья с нуля.</p>
+      <p>Во время render/reconciliation React уже получил новый результат компонентов, сопоставил его с текущим Fiber-деревом и подготовил рабочую версию дерева. Если какой-то DOM-узел должен измениться, соответствующий Fiber-узел уже помечен флагами. Если в поддереве есть работа, это также отражено во внутренних признаках поддерева. Если ветку можно было переиспользовать, React мог сделать bailout и не спускаться глубже без необходимости.</p>
+      <p>Поэтому commit можно понимать как этап применения. React берёт уже подготовленную работу и переносит её в host environment. В React DOM такой средой является DOM браузера.</p>
+      <p>Пример:</p>
+      <pre><code>
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return &lt;button onClick={() =&gt; setCount(count + 1)}&gt;{count}&lt;/button&gt;;
+}
+      </code></pre>
+      <p>Когда <code>count</code> меняется с <code>0</code> на <code>1</code>, render/reconciliation уже выяснил, что тип <code>button</code> остаётся тем же, а текстовый потомок должен измениться. Commit не пересоздаёт всю кнопку и не пересчитывает всё дерево. Он применяет минимальную DOM-операцию, которая нужна для соответствия последнему результату render.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>3. Что делает commit phase</h2>
+      <p>Фаза commit применяет результат React render к DOM. Внутри React эта фаза устроена сложнее, но для этой статьи важна основная последовательность:</p>
+      <ol>
+        <li>React применяет DOM mutations: вставляет, удаляет или обновляет DOM-узлы.</li>
+        <li>React обновляет refs, чтобы они указывали на актуальные DOM-узлы.</li>
+        <li>React выполняет layout effects, то есть <code>useLayoutEffect</code>.</li>
+        <li>Браузер получает возможность обновить изображение на экране.</li>
+        <li>React выполняет passive effects, то есть <code>useEffect</code>, с важными оговорками по времени выполнения.</li>
+      </ol>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>4. DOM mutations</h2>
+      <p>DOM mutations — это реальные изменения DOM, которые React DOM выполняет во время commit.</p>
+      <p>React может обновить текстовый узел, изменить <code>class</code>, <code>style</code>, DOM property вроде <code>disabled</code>, <code>checked</code> или <code>value</code>, вставить новый DOM-узел, удалить старое поддерево, обновить ref или применить другие изменения, которые были подготовлены на render/reconciliation.</p>
+      <p>Например:</p>
+      <pre><code>
+function SaveButton({ pending }: { pending: boolean }) {
+  return &lt;button disabled={pending}&gt;{pending ? "Saving..." : "Save"}&lt;/button&gt;;
+}
+      </code></pre>
+      <p>Если <code>pending</code> меняется с <code>false</code> на <code>true</code>, React не должен пересоздавать всё приложение. Для этой ветки достаточно обновить <code>disabled</code> у кнопки и её текст. Если остальная часть дерева не изменилась, она не требует DOM-мутаций.</p>
+      <p>Это важное отличие от render phase. Компонент может быть вызван заново, но DOM изменится только там, где результат действительно отличается. Официальная модель React прямо разделяет эти этапы: во время render React вычисляет, что должно быть показано, а во время commit применяет минимально необходимые изменения к DOM.</p>
+      <p>React управляет DOM внутри root container, который был передан в <code>createRoot</code> или <code>hydrateRoot</code>. DOM вне этого root не становится автоматически частью React-дерева. Если сторонний код меняет DOM внутри React root, он может конфликтовать с React, потому что React считает эту область своей управляемой средой.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>5. Refs во время commit</h2>
+      <p>Refs связаны с commit, потому что DOM-ссылку нельзя надёжно получить во время render. Во время render React только вычисляет следующий UI. Реальный DOM ещё не обновлён под этот результат.</p>
+      <p>После commit <code>ref.current</code> может указывать на DOM-узел:</p>
+      <pre><code>
+function SearchInput() {
+  const inputRef = useRef&lt;HTMLInputElement | null&gt;(null);
+
+  useLayoutEffect(() =&gt; {
+    inputRef.current?.focus();
+  }, []);
+
+  return &lt;input ref={inputRef} /&gt;;
+}
+      </code></pre>
+      <p>Здесь <code>inputRef.current</code> читается в <code>useLayoutEffect</code>, то есть после того, как React применил DOM-изменения. Это подходящий момент для синхронной работы с DOM до repaint.</p>
+      <p>Refs обычно читают в обработчиках событий, <code>useLayoutEffect</code> или <code>useEffect</code>. В render их используют не для чтения текущего DOM, а как стабильный контейнер значения.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>6. useLayoutEffect</h2>
+      <p><code>useLayoutEffect</code> выполняется после DOM mutations, но до того, как браузер перерисует экран. Поэтому код внутри <code>useLayoutEffect</code> видит DOM уже в состоянии текущего commit.</p>
+      <p>Это делает <code>useLayoutEffect</code> полезным для задач, где нельзя показать пользователю промежуточный кадр. Классический пример — измерить DOM и сразу скорректировать положение элемента.</p>
+      <pre><code>
+function Tooltip() {
+  const ref = useRef&lt;HTMLDivElement | null&gt;(null);
+  const [height, setHeight] = useState(0);
+
+  useLayoutEffect(() =&gt; {
+    const rect = ref.current!.getBoundingClientRect();
+    setHeight(rect.height);
+  }, []);
+
+  return (
+    &lt;div ref={ref} style={{ top: -height }}&gt;
+      Tooltip
+    &lt;/div&gt;
+  );
+}
+      </code></pre>
+      <p>На первом commit React вставляет DOM. Затем <code>useLayoutEffect</code> измеряет высоту и вызывает <code>setHeight</code>. React может выполнить дополнительный render и commit до того, как браузер покажет кадр пользователю. В результате пользователь видит уже исправленное положение, а не промежуточную версию.</p>
+      <p>Цена такого поведения — блокировка repaint. Код внутри <code>useLayoutEffect</code>, а также state updates, запущенные из него, не дают браузеру показать кадр, пока React не закончит эту работу. Поэтому <code>useLayoutEffect</code> не должен быть универсальным “кодом после render”. Если логика не должна блокировать визуальное обновление, лучше использовать <code>useEffect</code>.</p>
+      <p>Базовая последовательность <code>commit → useLayoutEffect → paint → useEffect</code> уже разбиралась в статье <a href="https://di-not.github.io/Browser/react-initial-render-effects-interactive.html">React initial render: первый render компонента, commit, useLayoutEffect и useEffect</a>. Здесь важно добавить именно update-смысл: при повторном обновлении <code>useLayoutEffect</code> видит DOM уже после текущих DOM mutations, но до следующего кадра браузера.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>7. Browser render после commit</h2>
+      <p>После того как React применил DOM-изменения и выполнил layout effects, браузер может обновить изображение на экране. Это уже не React render, а браузерная работа.</p>
+      <p>Подробно визуальный конвейер разобран в статье <a href="https://di-not.github.io/Browser/style-layout-paint-composite.html">Style → Layout → Paint → Composite</a>. В этой статье достаточно связать его с commit.</p>
+      <p>Если React изменил текст, <code>className</code>, inline styles или DOM-свойства, браузер должен понять, как это влияет на итоговый кадр. Иногда достаточно композитинга, иногда нужен paint, иногда требуется layout. Например, изменение <code>transform</code> или <code>opacity</code> при подходящих условиях может не требовать layout. А изменение размеров, положения или содержимого часто приводит к пересчёту layout.</p>
+      <p>Важно не смешивать уровни. React DOM mutations меняют DOM. Браузерный render превращает DOM и CSS в пиксели. React не выполняет CSS layout engine и не рисует пиксели напрямую.</p>
+      <p>Если commit меняет <code>className</code>, атрибуты или inline styles, браузер может пересчитать стили. Подробности CSS loading и CSSOM уже вынесены в статью <a href="https://di-not.github.io/Browser/css-loading-cssom-inline-definitions.html">CSS loading и CSSOM</a>. В текущем материале CSSOM нужен только как часть браузерного ответа на DOM/CSS-изменения после commit.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>8. useEffect</h2>
+      <p><code>useEffect</code> нужен для синхронизации компонента с внешними системами: сетевыми соединениями, подписками, таймерами, browser APIs, аналитикой, сторонними библиотеками.</p>
+      <pre><code>
+useEffect(() =&gt; {
+  const connection = createConnection(serverUrl, roomId);
+  connection.connect();
+
+  return () =&gt; {
+    connection.disconnect();
+  };
+}, [serverUrl, roomId]);
+      </code></pre>
+      <p>Если зависимости изменились, React выполняет cleanup старого effect, а затем setup нового effect. Например, если <code>roomId</code> изменился, старое подключение нужно закрыть, а новое открыть уже с новым значением.</p>
+      <p>В учебной диаграмме <code>useEffect</code> удобно ставить после browser render: DOM уже изменён, визуальный кадр может быть показан, а passive effects выполняют синхронизацию с внешним миром. Но важно помнить официальную оговорку React: если effect вызван взаимодействием пользователя, React может выполнить его до paint, чтобы результат был заметен системе событий. Поэтому на <code>useEffect</code> нельзя опираться для точных DOM-измерений перед кадром. Для визуальной работы, которая должна произойти до repaint, нужен <code>useLayoutEffect</code>.</p>
+      <p><code>useEffect</code> не нужен для вычисления данных, которые можно получить из props или state во время render. Если effect сразу вызывает <code>setState</code>, чтобы записать derived state, React делает лишний цикл: render, commit, effect, снова update, снова render и commit. В таких случаях лучше вычислять значение во время render или использовать <code>useMemo</code>, если вычисление дорогое.</p>
+      <p>Также <code>useEffect</code> не должен заменять обработчики событий. Если действие должно произойти из-за клика, отправки формы или ввода, оно обычно должно быть в соответствующем обработчике. Effect нужен тогда, когда причина — сам факт, что компонент сейчас отображается с такими props/state и должен быть синхронизирован с внешней системой.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>9. useEffect может запустить новый update</h2>
+      <p>Если <code>useEffect</code> вызывает <code>setState</code>, React возвращается к началу update-цикла.</p>
+      <pre><code>
+function UserName({ userId }: { userId: string }) {
+  const [name, setName] = useState&lt;string | null&gt;(null);
+
+  useEffect(() =&gt; {
+    let ignore = false;
+
+    fetch(`/api/users/${userId}`)
+      .then((response) =&gt; response.json())
+      .then((data) =&gt; {
+        if (!ignore) {
+          setName(data.name);
+        }
+      });
+
+    return () =&gt; {
+      ignore = true;
+    };
+  }, [userId]);
+
+  return &lt;p&gt;{name ?? "Loading..."}&lt;/p&gt;;
+}
+      </code></pre>
+      <p>Первый commit может показать <code>Loading...</code>. После commit запускается effect, начинается запрос. Когда данные приходят, <code>setName</code> создаёт новый update. Дальше React снова проходит queue update, batching, scheduling, render/reconciliation и commit.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>10. Производительность commit-пути</h2>
+      <p>Commit находится близко к визуальному обновлению, поэтому тяжёлая работа здесь особенно заметна. Сам commit должен быть коротким, а код в <code>useLayoutEffect</code> — минимальным.</p>
+      <p>Опасный паттерн — смешивать чтение layout и запись стилей в цикле:</p>
+      <pre><code>
+useLayoutEffect(() =&gt; {
+  items.forEach((item) =&gt; {
+    const width = item.el.offsetWidth;
+    item.el.style.height = `${width}px`;
+  });
+}, [items]);
+      </code></pre>
+      <p>Такой код может заставлять браузер синхронно пересчитывать layout снова и снова. Лучше разделять чтение и запись:</p>
+      <pre><code>
+useLayoutEffect(() =&gt; {
+  const widths = items.map((item) =&gt; item.el.offsetWidth);
+
+  items.forEach((item, index) =&gt; {
+    item.el.style.height = `${widths[index]}px`;
+  });
+}, [items]);
+      </code></pre>
+      <p>Но даже улучшенный вариант всё равно блокирует repaint, если выполняется в <code>useLayoutEffect</code>. Поэтому главный вопрос не “можно ли это написать в <code>useLayoutEffect</code>”, а “должно ли это обязательно произойти до следующего кадра”. Если нет — лучше использовать <code>useEffect</code> или перенести работу в другой момент.</p>
+      <p>Подробности forced layout, layout thrashing и стоимости визуальных этапов относятся к браузерной статье <a href="https://di-not.github.io/Browser/style-layout-paint-composite.html">Style → Layout → Paint → Composite</a>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>11. Что важно не перепутать</h2>
+      <p>React render и browser render — разные вещи. React render вызывает компоненты и вычисляет UI. Browser render превращает DOM и CSS в визуальный кадр.</p>
+      <p>Reconciliation и commit — тоже разные вещи. Reconciliation вычисляет, что должно измениться. Commit применяет подготовленный результат к DOM.</p>
+      <p>Re-render не означает DOM mutation. Компонент может быть вызван заново, но если результат совпал с прошлым, React может не менять DOM.</p>
+      <p><code>useLayoutEffect</code> — не обычный effect после render. Он выполняется после DOM mutations и до repaint, поэтому может блокировать показ кадра.</p>
+      <p><code>useEffect</code> — не место для derived state и не замена обработчиков событий. Он нужен для синхронизации с внешними системами.</p>
+      <p>Refs на DOM-узлы становятся надёжно доступны после commit. Читать DOM ref во время render — слишком рано.</p>
+      <p><code>DOMContentLoaded</code> и <code>load</code> не означают, что React effects завершены. Эти события относятся к HTML parsing, scripts и ресурсам страницы. Их место в браузерном пути разобрано в статье <a href="https://di-not.github.io/Browser/domcontentloaded-subresources-load.html">DOMContentLoaded → subresources → load</a>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>Источники</h2>
+      <h3>Связанные материалы карты</h3>
+      <ul>
+        <li><a href="https://di-not.github.io/Browser/index.html">Web Lifecycle Map</a></li>
+        <li><a href="https://di-not.github.io/Browser/react-spa-before-render-phase-dcl-fixed.html">React SPA до React Render Phase</a></li>
+        <li><a href="https://di-not.github.io/Browser/react-initial-render-effects-interactive.html">React initial render: первый render компонента, commit, useLayoutEffect и useEffect</a></li>
+        <li><a href="https://di-not.github.io/Browser/css-loading-cssom-inline-definitions.html">CSS loading и CSSOM</a></li>
+        <li><a href="https://di-not.github.io/Browser/domcontentloaded-subresources-load.html">DOMContentLoaded → subresources → load</a></li>
+        <li><a href="https://di-not.github.io/Browser/style-layout-paint-composite.html">Style → Layout → Paint → Composite</a></li>
+      </ul>
+      <h3>Официальные источники</h3>
+      <ul>
+        <li><a href="https://react.dev/learn/render-and-commit">React docs — Render and Commit</a></li>
+        <li><a href="https://react.dev/reference/react/useLayoutEffect">React docs — useLayoutEffect</a></li>
+        <li><a href="https://react.dev/reference/react/useEffect">React docs — useEffect</a></li>
+        <li><a href="https://react.dev/learn/manipulating-the-dom-with-refs">React docs — Manipulating the DOM with Refs</a></li>
+        <li><a href="https://react.dev/learn/you-might-not-need-an-effect">React docs — You Might Not Need an Effect</a></li>
+        <li><a href="https://web.dev/articles/rendering-performance">web.dev — Rendering performance</a></li>
+        <li><a href="https://web.dev/articles/avoid-large-complex-layouts-and-layout-thrashing">web.dev — Avoid large, complex layouts and layout thrashing</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

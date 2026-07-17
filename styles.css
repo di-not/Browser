@@ -51,7 +51,7 @@ code {
 }
 
 body.has-toc .container {
-  width: min(1180px, calc(100% - 2rem));
+  width: min(760px, calc(100% - 2rem));
 }
 
 .site-header {
@@ -153,23 +153,25 @@ hr {
 }
 
 .article-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  gap: 3rem;
-  align-items: start;
+  position: relative;
 }
 
 .article-content {
   min-width: 0;
+  width: 100%;
 }
 
 .article-toc {
-  position: sticky;
+  position: fixed;
   top: 1.5rem;
+  right: 1.5rem;
+  width: min(280px, calc(100vw - 2rem));
   max-height: calc(100vh - 3rem);
+  padding-right: 0.25rem;
   padding-left: 1.25rem;
   overflow: auto;
   border-left: 1px solid var(--line);
+  background: var(--bg);
 }
 
 .article-toc-title {
@@ -231,14 +233,15 @@ hr {
   }
 
   .article-layout {
-    grid-template-columns: 1fr;
-    gap: 2rem;
+    display: block;
   }
 
   .article-toc {
     position: static;
+    width: auto;
     max-height: none;
     padding-top: 1.25rem;
+    padding-right: 0;
     padding-left: 0;
     border-top: 1px solid var(--line);
     border-left: 0;
