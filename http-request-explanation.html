@@ -400,7 +400,22 @@ PATCH /api/profile</pre>
     </section>
 
     <section>
-      <h2>10. Credentials, cookies и CORS</h2>
+      <h2>10. Request может попасть на CDN edge</h2>
+      <p>HTTP Request не всегда сразу приходит на origin server. Если сайт использует CDN, запрос может сначала попасть на CDN edge — ближайший или выбранный сетевой узел CDN.</p>
+      <p>Для браузера это всё ещё обычный HTTP Request к URL: тот же scheme, host, path, query, headers. Разница в том, кто на сетевой стороне первым принимает запрос. Вместо origin server это может быть CDN edge.</p>
+      <p>CDN edge может:</p>
+      <ul>
+        <li>отдать уже сохранённый response из edge cache;</li>
+        <li>отправить запрос дальше на origin server;</li>
+        <li>получить response от origin;</li>
+        <li>вернуть response браузеру;</li>
+        <li>при подходящих HTTP-заголовках сохранить response для следующих запросов.</li>
+      </ul>
+      <p>Важно не смешивать это с Memory/Disk HTTP Cache браузера. Если response взят из Memory/Disk Cache, браузер может вообще не идти в сеть. Если response пришёл из CDN cache, сетевой request уже был сделан, просто origin server мог не участвовать.</p>
+    </section>
+
+    <section>
+      <h2>11. Credentials, cookies и CORS</h2>
       <p>Некоторые запросы включают credentials:</p>
       <pre>cookies
 HTTP authentication
@@ -421,7 +436,7 @@ TLS client certificates</pre>
     </section>
 
     <section>
-      <h2>11. Что HTTP Request не делает</h2>
+      <h2>12. Что HTTP Request не делает</h2>
       <p>Важно не путать этапы.</p>
       <p>HTTP Request не выполняет DNS. DNS уже был нужен раньше, чтобы получить IP.</p>
       <p>
@@ -432,7 +447,15 @@ TLS client certificates</pre>
     </section>
 
     <section>
-      <h2>12. Как блок связан с общей схемой</h2>
+      <h2>13. CDN cache hit и cache miss</h2>
+      <p>Когда request приходит на CDN edge, возможны два основных сценария.</p>
+      <p>При cache hit CDN уже имеет подходящий response и может вернуть его браузеру без обращения к origin server. Браузер при этом получает обычный HTTP Response: status, headers и body.</p>
+      <p>При cache miss CDN не имеет подходящего response. Тогда CDN сам делает запрос к origin server, получает response, возвращает его браузеру и может сохранить копию в edge cache, если это разрешено правилами кэширования.</p>
+      <p>На возможность кэширования влияют HTTP-заголовки, например <code>Cache-Control</code>, <code>Vary</code>, <code>ETag</code>, а также правила конкретной CDN. В терминах HTTP это shared cache: кэш между клиентом и сервером, который может использоваться для ответов разным пользователям. MDN описывает shared cache как кэш между клиентом и сервером, а <code>Cache-Control</code> — как заголовок, управляющий кэшированием в браузерах и shared caches, включая proxies и CDNs.</p>
+    </section>
+
+    <section>
+      <h2>14. Как блок связан с общей схемой</h2>
       <p>В общей схеме:</p>
       <pre>Открыть / переиспользовать соединение
 → HTTP Request
@@ -446,7 +469,7 @@ cache state → conditional headers, если нужна revalidation</pre>
     </section>
 
     <section>
-      <h2>13. Мини-глоссарий</h2>
+      <h2>15. Мини-глоссарий</h2>
 
       <h3>HTTP</h3>
       <p>Hypertext Transfer Protocol — протокол прикладного уровня для передачи ресурсов и сообщений между клиентом и сервером.</p>
