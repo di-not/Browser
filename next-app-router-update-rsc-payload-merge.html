@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Next.js App Router update: navigation, refresh, Server Action и RSC payload merge</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="toc.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <p><a class="back-link" href="index.html">← На главную</a></p>
+      <h1>Next.js App Router update: navigation, refresh, Server Action и RSC payload merge</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>1. Место этого блока в общей схеме</h2>
+      <p>Эта статья разбирает участок Next.js App Router update, который начинается с выбора типа обновления и заканчивается слиянием нового RSC Payload с текущим клиентским деревом.</p>
+      <p>В схеме этот участок выглядит так:</p>
+      <pre>Тип Next App Router update?
+├─ Router navigation
+├─ Refetch / revalidate
+├─ Server Action
+└─ RSC update
+      ↓
+Получить новый RSC / Flight Payload
+      ↓
+RSC payload merge
+      ↓
+React Fiber</pre>
+      <p>Ветка <code>Client state update → React Synthetic Event</code> сюда не входит. Если пользователь нажал кнопку внутри Client Component, обработчик вызвал <code>setState</code>, и дальше всё пошло через обычный React-путь, это уже не App Router update в смысле этой статьи. Такой путь разбирается отдельно: <a href="https://di-not.github.io/Browser/react-user-action-event-update-batching.html">React client update: user action → event handler → queue update → batching</a>, <a href="https://di-not.github.io/Browser/react-scheduling-priority-lanes.html">Scheduling, priority и lanes</a>, <a href="https://di-not.github.io/Browser/react-fiber-render-reconciliation-bailout.html">React Fiber: фаза render, reconciliation и bailout</a>.</p>
+      <p>Здесь рассматривается другой тип обновления: когда источником следующего UI становится не локальный <code>setState</code>, а новый серверный результат App Router — RSC Payload.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>2. Почему эта ветка отличается от обычного React update</h2>
+      <p>В обычном клиентском React-обновлении всё начинается внутри браузера. Пользователь совершает действие, React вызывает обработчик события, обработчик ставит state update, React планирует работу, выполняет render/reconciliation и commit.</p>
+      <p>В App Router часть обновлений устроена иначе. Навигация, <code>router.refresh()</code>, revalidation или Server Action могут потребовать нового результата от сервера. В этом случае клиентская среда Next.js обращается к серверу или использует уже подготовленные данные из Router Cache, получает RSC Payload и передаёт этот результат в React.</p>
+      <p>Ключевая разница:</p>
+      <pre>Обычный React update:
+локальный state update → React Fiber → render/reconciliation → commit
+
+Next App Router update:
+серверный RSC Payload → merge с текущим деревом → React Fiber → render/reconciliation → commit</pre>
+      <p><code>RSC payload merge</code> не означает, что DOM уже изменился. Это означает, что Next.js и React получили новый серверный материал для дерева компонентов. Реальные DOM-изменения произойдут позже, если после Fiber/render/reconciliation/commit окажется, что DOM нужно менять.</p>
+      <p>Подробности commit-пути после Fiber разбираются отдельно: <a href="https://di-not.github.io/Browser/react-commit-phase-dom-use-layout-effect-browser-render-use-effect.html">React update: commit phase, DOM mutations, useLayoutEffect, browser render и useEffect</a>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>3. Что такое RSC Payload</h2>
+      <p>RSC Payload — это React Server Component Payload. В документации Next.js он описывается как компактное бинарное представление отрендеренного дерева React Server Components.</p>
+      <p>В RSC Payload могут быть:</p>
+      <ul>
+        <li>результат рендера Server Components;</li>
+        <li>места, где должны быть Client Components;</li>
+        <li>ссылки на JavaScript-файлы Client Components;</li>
+        <li>props, переданные из Server Components в Client Components.</li>
+      </ul>
+      <p>Это не HTML-документ и не обычный JSON API для приложения. Это формат React Server Components, который нужен React на клиенте, чтобы согласовать Server Components и Client Components в одно дерево.</p>
+      <p>На initial load App Router может прислать HTML, чтобы быстро показать предварительный UI, и RSC Payload, чтобы React мог согласовать серверное и клиентское дерево. Эта часть уже относится к первичной загрузке Next.js и разобрана отдельно: <a href="https://di-not.github.io/Browser/next-app-router-streamed-html-rsc-client-refs-final.html">Next.js App Router: потоковый HTML, RSC payload, ссылки на клиентские компоненты и первые JavaScript-фрагменты</a> и <a href="https://di-not.github.io/Browser/next-app-router-hydration.html">Next.js App Router: гидратация Client Components</a>.</p>
+      <p>В этой статье речь не о первом открытии страницы, а о последующих обновлениях: пользователь уже находится внутри App Router, приложение уже интерактивно, и какой-то App Router-механизм приводит к новому RSC Payload.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>4. Server Components и Client Components в этом блоке</h2>
+      <p>В App Router <code>layout</code> и <code>page</code> по умолчанию являются Server Components. Они могут получать данные на сервере, использовать секреты, работать ближе к базе данных или API и не увеличивать клиентский JavaScript bundle.</p>
+      <p>Client Components нужны там, где требуется интерактивность: state, обработчики событий, Effects, browser APIs или custom Hooks. Они обозначаются директивой <code>'use client'</code>.</p>
+      <p>Эта граница важна для update-ветки. Когда App Router получает новый RSC Payload, он получает новый серверный результат для Server Components и информацию о местах Client Components. Но Client Components остаются клиентскими интерактивными частями. Их JavaScript должен быть доступен в браузере, а их локальное состояние может сохраняться или сбрасываться по обычным правилам React: тип, позиция, <code>key</code>, границы дерева.</p>
+      <p>Поэтому RSC Payload не “заменяет React”. Он приносит серверную часть результата, а React на клиенте всё равно должен совместить её с уже существующим клиентским деревом.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>5. Router navigation</h2>
+      <p>Router navigation — это переход между route внутри App Router без полной перезагрузки документа.</p>
+      <p>Обычно для переходов используется <code>&lt;Link&gt;</code>:</p>
+      <pre><code>import Link from 'next/link';
+
+export function Header() {
+  return &lt;Link href="/dashboard"&gt;Dashboard&lt;/Link&gt;;
+}</code></pre>
+      <p>Для программной навигации внутри Client Component используется <code>useRouter</code> из <code>next/navigation</code>:</p>
+      <pre><code>'use client';
+
+import { useRouter } from 'next/navigation';
+
+export function DashboardButton() {
+  const router = useRouter();
+
+  return (
+    &lt;button onClick={() =&gt; router.push('/dashboard')}&gt;
+      Dashboard
+    &lt;/button&gt;
+  );
+}</code></pre>
+      <p><code>router.push()</code> выполняет client-side navigation и добавляет запись в history stack. <code>router.replace()</code> тоже выполняет client-side navigation, но без добавления новой записи в историю.</p>
+      <p>В App Router routes рендерятся на сервере по умолчанию. Это означает, что для новой страницы клиенту часто нужен серверный результат. Но при client-side navigation браузер не обязан заново загружать полный HTML document. Вместо этого App Router получает или использует RSC Payload для нужного route.</p>
+      <p>Если payload для route уже есть в Router Cache, переход может использовать его без нового запроса к серверу. Если нужных route segments в cache нет, Next.js получает RSC Payload с сервера и заполняет Router Cache.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>6. Prefetch и Router Cache</h2>
+      <p>Next.js использует prefetching, чтобы сделать навигацию быстрее. <code>&lt;Link&gt;</code> может заранее подготовить route, когда ссылка появляется в viewport. Для ручного prefetch можно вызвать <code>router.prefetch()</code>.</p>
+      <pre><code>'use client';
+
+import { useRouter } from 'next/navigation';
+
+export function PricingPreview() {
+  const router = useRouter();
+
+  return (
+    &lt;div onMouseEnter={() =&gt; router.prefetch('/pricing')}&gt;
+      Pricing
+    &lt;/div&gt;
+  );
+}</code></pre>
+      <p>Результат prefetch связан не просто с “HTML будущей страницы”. В App Router важен RSC Payload. Next.js хранит RSC Payload в клиентском Router Cache — in-memory cache, разделённом по route segments. Этот cache используется для уже посещённых route и для prefetched route.</p>
+      <p>Это объясняет, почему navigation-ветка в схеме сразу ведёт к <code>Получить новый RSC / Flight Payload</code>: “получить” здесь не всегда означает “сделать новый network request”. Иногда payload уже находится в Router Cache. Но для дальнейшей модели это неважно: App Router всё равно получает RSC Payload как вход для обновления дерева.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>7. router.refresh()</h2>
+      <p><code>router.refresh()</code> обновляет текущий route. Он делает новый запрос к серверу, заново получает данные, заново рендерит Server Components и возвращает обновлённый RSC Payload.</p>
+      <pre><code>'use client';
+
+import { useRouter } from 'next/navigation';
+
+export function RefreshButton() {
+  const router = useRouter();
+
+  return (
+    &lt;button onClick={() =&gt; router.refresh()}&gt;
+      Refresh
+    &lt;/button&gt;
+  );
+}</code></pre>
+      <p>Важная особенность: клиент сливает обновлённый RSC Payload без потери незатронутого client-side React state, например <code>useState</code>, и browser state, например scroll position.</p>
+      <p>Но <code>router.refresh()</code> не означает автоматическую инвалидацию server-side cache. Он очищает Client Cache для текущего route, но если server-side данные остаются cached, результат может оказаться тем же. Для server-side cached data используются <code>revalidatePath()</code> или <code>revalidateTag()</code>.</p>
+      <p>Такой путь в схеме соответствует ветке <code>Refetch / revalidate → Получить новый RSC / Flight Payload</code>.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>8. revalidatePath и revalidateTag</h2>
+      <p><code>revalidatePath()</code> и <code>revalidateTag()</code> относятся к server-side revalidation. Они не вызываются из Client Components напрямую.</p>
+      <p><code>revalidatePath()</code> инвалидирует cached data для конкретного path. В Server Functions он может обновить UI сразу, если пользователь сейчас находится на затронутом path. В Route Handlers он помечает path для revalidation, и фактическая revalidation произойдёт при следующем посещении этого path.</p>
+      <p>Пример Server Action:</p>
+      <pre><code>'use server';
+
+import { revalidatePath } from 'next/cache';
+
+export async function createPost(formData: FormData) {
+  await db.post.create({
+    data: {
+      title: String(formData.get('title')),
+    },
+  });
+
+  revalidatePath('/posts');
+}</code></pre>
+      <p><code>revalidateTag()</code> работает с cached data, помеченными tag. Это удобно, когда одни и те же данные используются в разных route.</p>
+      <p>Для схемы важно не перепутать два уровня:</p>
+      <ul>
+        <li><code>router.refresh()</code> — клиент просит обновить текущий route и получить новый RSC Payload;</li>
+        <li><code>revalidatePath()</code> / <code>revalidateTag()</code> — сервер инвалидирует cached data;</li>
+        <li>после revalidation новый RSC Payload может прийти в ответе Server Action, при refresh или при следующей навигации.</li>
+      </ul>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>9. Server Action request</h2>
+      <p>Server Action — это React Server Function, вызываемая через механизмы React actions: например, через <code>&lt;form action&gt;</code>, <code>&lt;button formAction&gt;</code> или из client-side transition. В Next.js Server Actions часто используются для мутаций: создать запись, обновить профиль, удалить item, изменить cookies, инвалидировать cache.</p>
+      <p>Пример формы:</p>
+      <pre><code>export default function Page() {
+  async function createInvoice(formData: FormData) {
+    'use server';
+
+    const amount = formData.get('amount');
+    // mutate data
+    // revalidate cache
+  }
+
+  return &lt;form action={createInvoice}&gt;...&lt;/form&gt;;
+}</code></pre>
+      <p>С точки зрения клиентской схемы это не обычный <code>setState</code>. Клиент отправляет action request на сервер. Сервер выполняет функцию, может изменить данные и cache, а затем Next.js может вернуть клиенту не только значение action, но и новый RSC Payload.</p>
+      <p>Важная официальная особенность Next.js: когда Server Action запускает немедленную revalidation, Next.js делает это в одном HTTP request. Он выполняет action, затем server-side re-render текущего route, и response возвращает и результат action, и новый RSC Payload в одном Flight stream.</p>
+      <p>Это значит: для обновления текущей страницы после action часто не нужен отдельный follow-up fetch. Серверная мутация, invalidation и новое серверное представление UI могут прийти за один roundtrip.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>10. Server Action: return value и UI в одном ответе</h2>
+      <p>Server Action может вернуть значение, которое прочитает клиентский код или <code>useActionState</code>. Но в App Router это не единственная часть ответа.</p>
+      <p>Если action вызывает <code>updateTag</code>, <code>revalidatePath</code>, <code>refresh</code>, меняет cookies или вызывает <code>redirect</code>, Next.js может включить в response заново отрендеренный RSC Payload.</p>
+      <p>Пример:</p>
+      <pre><code>'use server';
+
+import { revalidatePath } from 'next/cache';
+
+export async function createPost(formData: FormData) {
+  await db.post.create({
+    data: {
+      title: String(formData.get('title')),
+    },
+  });
+
+  revalidatePath('/posts');
+
+  return { ok: true };
+}</code></pre>
+      <p>Клиент может получить return value <code>{ ok: true }</code>, а вместе с ним — обновлённый RSC Payload для текущего route. После этого App Router сливает payload с текущим деревом, и React продолжает обычный путь обновления.</p>
+      <p><code>revalidateTag()</code> со stale-while-revalidate профилем является исключением: он помечает tag для background refresh и не включает немедленный re-render в action response. UI отразит изменения при последующем чтении.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>11. Redirect после Server Action</h2>
+      <p>Server Action может вызвать <code>redirect()</code>.</p>
+      <pre><code>'use server';
+
+import { redirect } from 'next/navigation';
+
+export async function createPost(formData: FormData) {
+  const post = await db.post.create({
+    data: {
+      title: String(formData.get('title')),
+    },
+  });
+
+  redirect(`/posts/${post.id}`);
+}</code></pre>
+      <p>В этом случае результатом action становится не просто обновление текущего route. Router должен перейти к другому URL. В твоей схеме это правильно выделено развилкой: <code>Redirect или обновлённый RSC payload?</code>.</p>
+      <p>Если action вызывает redirect, response навигирует router и stream-ит RSC Payload для destination route. Поэтому дальше логически начинается навигационный путь: новый URL, новый route, новый серверный результат, новый payload.</p>
+      <p>Важно: <code>redirect()</code> прерывает выполнение как control-flow mechanism. Код после <code>redirect()</code> не должен рассматриваться как обычное продолжение action. Если destination нужны свежие данные, revalidation нужно сделать до redirect.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>12. Получить новый RSC / Flight Payload</h2>
+      <p>В схеме узел <code>Получить новый RSC / Flight Payload</code> объединяет несколько источников:</p>
+      <ul>
+        <li>navigation запросила новый route;</li>
+        <li><code>router.refresh()</code> запросил текущий route заново;</li>
+        <li>Server Action вернула обновлённый серверный результат;</li>
+        <li>cache revalidation сделала следующий серверный результат другим;</li>
+        <li>Router Cache уже содержал prefetched payload.</li>
+      </ul>
+      <p>Слово <code>Flight</code> часто используется как название потока/формата, в котором передаётся React Server Components результат. В пользовательской документации Next.js чаще используется термин RSC Payload.</p>
+      <p>Для статьи важно понимать не внутренний протокол, а роль payload:</p>
+      <p>RSC Payload — это вход для React на клиенте. Он содержит серверный результат и информацию о Client Component boundaries. После его получения Next.js не “вставляет HTML в DOM”, а передаёт данные в React-дерево.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>13. RSC payload merge</h2>
+      <p><code>RSC payload merge</code> — центральный узел этого блока.</p>
+      <p>На этом этапе клиентская среда Next.js/React берёт новый RSC Payload и совмещает его с текущим клиентским деревом. Server Components обновляются по серверному payload. Client Component boundaries остаются местами, где интерактивность живёт на клиенте.</p>
+      <p>Для <code>router.refresh()</code> документация Next.js прямо подчёркивает: клиент merge-ит обновлённый RSC Payload без потери незатронутого client-side React state и browser state. Это не значит, что любой state всегда сохраняется. Состояние сохраняется там, где React может сохранить соответствующие Client Components по обычным правилам дерева. Если route segment, key или граница компонента меняются так, что старая ветка перестаёт соответствовать новой, состояние может быть сброшено.</p>
+      <p>Поэтому правильная модель такая:</p>
+      <pre>RSC Payload обновляет серверную часть дерева.
+Client Components остаются клиентскими границами.
+React решает, что сохранить и что заменить, по обычным правилам reconciliation.</pre>
+      <p><code>RSC payload merge</code> не является DOM mutation. DOM изменится только после того, как React обработает новое дерево через Fiber, render/reconciliation и commit.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>14. Что происходит с Client Components</h2>
+      <p>Client Components не становятся Server Components из-за RSC update. Они остаются клиентскими.</p>
+      <p>Пример:</p>
+      <pre><code>// Server Component
+export default async function Page() {
+  const products = await getProducts();
+
+  return &lt;ProductList products={products} /&gt;;
+}</code></pre>
+      <pre><code>'use client';
+
+export function ProductList({ products }: { products: Product[] }) {
+  const [selectedId, setSelectedId] = useState&lt;string | null&gt;(null);
+
+  return (
+    &lt;ul&gt;
+      {products.map(product =&gt; (
+        &lt;li key={product.id} onClick={() =&gt; setSelectedId(product.id)}&gt;
+          {product.name}
+        &lt;/li&gt;
+      ))}
+    &lt;/ul&gt;
+  );
+}</code></pre>
+      <p>Если Server Action или <code>router.refresh()</code> приводит к новому списку <code>products</code>, RSC Payload может принести новые props для <code>ProductList</code>. После merge React обновит Client Component через обычный React-механизм. Локальный <code>selectedId</code> может сохраниться, если компонент остаётся той же веткой дерева. Но если route segment или <code>key</code> приводит к remount, состояние сбросится.</p>
+      <p>Важно не путать:</p>
+      <ul>
+        <li>RSC Payload может изменить props, которые приходят в Client Component;</li>
+        <li>обработчики событий внутри Client Component всё равно существуют только в клиентском JavaScript;</li>
+        <li>локальный <code>useState</code> внутри Client Component не хранится на сервере;</li>
+        <li>Server Components не получают event handlers и не используют browser APIs.</li>
+      </ul>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>15. Что происходит с URL, history и scroll</h2>
+      <p>Для navigation App Router обновляет URL и history через router-механизм. <code>router.push()</code> добавляет запись в history stack, <code>router.replace()</code> заменяет текущую запись.</p>
+      <p>По умолчанию Next.js прокручивает страницу вверх при переходе на новый route. Это поведение можно отключить опцией <code>scroll: false</code> у <code>router.push()</code> или <code>router.replace()</code>.</p>
+      <p><code>router.refresh()</code> отличается от navigation. Он обновляет текущий route, но не означает переход на другой URL. При refresh Next.js сливает новый RSC Payload без потери browser state вроде scroll position, если соответствующая часть UI остаётся незатронутой.</p>
+      <p>Это важно для схемы: navigation и refresh могут оба привести к RSC Payload, но их смысл для URL/history разный.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>16. Полная последовательность блока</h2>
+      <p>Последовательность для Router navigation:</p>
+      <pre>&lt;Link&gt; или router.push()
+→ App Router client-side navigation
+→ Router Cache hit или запрос к серверу
+→ RSC Payload для нового route
+→ RSC payload merge
+→ React Fiber
+→ render/reconciliation
+→ commit</pre>
+      <p>Последовательность для <code>router.refresh()</code>:</p>
+      <pre>router.refresh()
+→ запрос текущего route на сервер
+→ re-render Server Components
+→ обновлённый RSC Payload
+→ merge без потери незатронутого client/browser state
+→ React Fiber
+→ render/reconciliation
+→ commit</pre>
+      <p>Последовательность для Server Action:</p>
+      <pre>&lt;form action&gt; / action вызвана из Client Component
+→ POST request к серверу
+→ Server Action выполняет мутацию
+→ revalidatePath / updateTag / refresh / cookies / redirect при необходимости
+→ return value и/или новый RSC Payload в ответе
+→ RSC payload merge или navigation при redirect
+→ React Fiber
+→ render/reconciliation
+→ commit</pre>
+      <p>Главная модель: App Router update может начинаться не с <code>setState</code>, а с серверного payload. Но после <code>RSC payload merge</code> React всё равно возвращается к своему обычному механизму обновления UI.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>17. Что важно не перепутать</h2>
+      <p><code>RSC Payload</code> — не HTML document. HTML может использоваться для initial preview, но RSC Payload нужен React на клиенте для согласования Server и Client Components.</p>
+      <p><code>RSC payload merge</code> — не DOM mutation. Это обновление React-дерева на основе серверного payload. DOM меняется позже, на commit.</p>
+      <p><code>router.refresh()</code> — не то же самое, что <code>revalidatePath()</code>. Refresh делает новый запрос текущего route и merge-ит обновлённый RSC Payload. <code>revalidatePath()</code> инвалидирует server-side cached data для path и работает только на сервере.</p>
+      <p><code>Server Action</code> — не обычный API endpoint в пользовательской модели. Разработчик пишет серверную функцию, которую React/Next может вызвать через action-механизм; Next.js может вернуть и данные, и обновлённый UI в одном Flight stream.</p>
+      <p><code>Client Component</code> не становится серверным после RSC update. Он остаётся клиентской границей с локальным state, effects и event handlers.</p>
+      <p><code>Client state update</code> не входит в этот блок. Если update начинается с <code>setState</code> внутри Client Component, это обычная React ветка.</p>
+    </section>
+
+    <hr>
+
+    <section>
+      <h2>Источники</h2>
+      <h3>Официальные источники Next.js</h3>
+      <ul>
+        <li><a href="https://nextjs.org/docs/app/getting-started/server-and-client-components">Next.js docs — Server and Client Components</a></li>
+        <li><a href="https://nextjs.org/docs/app/getting-started/linking-and-navigating">Next.js docs — Linking and Navigating</a></li>
+        <li><a href="https://nextjs.org/docs/app/api-reference/functions/use-router">Next.js docs — useRouter</a></li>
+        <li><a href="https://nextjs.org/docs/app/guides/prefetching">Next.js docs — Prefetching</a></li>
+        <li><a href="https://nextjs.org/docs/app/guides/server-actions">Next.js docs — Server Actions and Mutations</a></li>
+        <li><a href="https://nextjs.org/docs/app/guides/forms">Next.js docs — Forms with Server Actions</a></li>
+        <li><a href="https://nextjs.org/docs/app/api-reference/functions/revalidatePath">Next.js docs — revalidatePath</a></li>
+        <li><a href="https://nextjs.org/docs/app/api-reference/functions/revalidateTag">Next.js docs — revalidateTag</a></li>
+        <li><a href="https://nextjs.org/docs/app/guides/cdn-caching">Next.js docs — CDN Caching</a></li>
+        <li><a href="https://nextjs.org/docs/app/glossary">Next.js docs — App Router Glossary</a></li>
+      </ul>
+      <h3>Связанные статьи карты</h3>
+      <ul>
+        <li><a href="https://di-not.github.io/Browser/index.html">Web Lifecycle Map</a></li>
+        <li><a href="https://di-not.github.io/Browser/next-app-router-streamed-html-rsc-client-refs-final.html">Next.js App Router: потоковый HTML, RSC payload, ссылки на клиентские компоненты и первые JavaScript-фрагменты</a></li>
+        <li><a href="https://di-not.github.io/Browser/next-app-router-hydration.html">Next.js App Router: гидратация Client Components</a></li>
+        <li><a href="https://di-not.github.io/Browser/react-user-action-event-update-batching.html">React client update: user action → event handler → queue update → batching</a></li>
+        <li><a href="https://di-not.github.io/Browser/react-scheduling-priority-lanes.html">React client update: Scheduling, priority и lanes</a></li>
+        <li><a href="https://di-not.github.io/Browser/react-fiber-render-reconciliation-bailout.html">React Fiber: фаза render, reconciliation и bailout</a></li>
+        <li><a href="https://di-not.github.io/Browser/react-commit-phase-dom-use-layout-effect-browser-render-use-effect.html">React update: commit phase, DOM mutations, useLayoutEffect, browser render и useEffect</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
